@@ -15,6 +15,7 @@ from neuron import h
 h.load_file("stdrun.hoc")
 # Cells are defined in other files
 import network
+from config import pc # for h.ParallelContext()
 import fileio as fio
 import paramrw as paramrw
 from paramrw import usingOngoingInputs
@@ -35,7 +36,6 @@ dconf = readconf()
 # data directory - ./data
 dproj = dconf['datdir'] # fio.return_data_dir(dconf['datdir'])
 debug = dconf['debug']
-pc = h.ParallelContext()
 pcID = int(pc.id())
 f_psim = ''
 ntrial = 1
@@ -66,17 +66,11 @@ datdir = os.path.join(dproj,simstr)
 def spikes_write (net, filename_spikes):
   f = open(filename_spikes,'w')
   f.close() # first make sure writes to an empty file
-  for rank in range(int(pc.nhost())):
-    # guarantees node order and no competition
-    pc.barrier()
-    if rank == int(pc.id()):
-      # net.spiketimes and net.spikegids are type h.Vector()
-      L = int(net.spikegids.size())
-      with open(filename_spikes, 'a') as file_spikes:
-        for i in range(L):
-          file_spikes.write('%3.2f\t%d\n' % (net.spiketimes.x[i], net.spikegids.x[i]))
-  # let all nodes iterate through loop in which only one rank writes
-  pc.barrier()
+
+  L = int(net.spikegids.size())
+  with open(filename_spikes, 'a') as file_spikes:
+    for i in range(L):
+      file_spikes.write('%3.2f\t%d\n' % (net.spiketimes.x[i], net.spikegids.x[i]))
 
 # copies param file into root dsim directory
 def copy_paramfile (dsim, f_psim, str_date):
@@ -93,21 +87,9 @@ def prsimtime ():
 
 # save somatic voltage of all cells to pkl object
 def save_vsoma ():
-  for host in range(int(pc.nhost())):
-    if host == pcID:
-      dsoma = net.get_vsoma()
-      messageid = pc.pack(dsoma) # create a message ID and store this value
-      pc.post(host,messageid) # post the message
-  if pcID==0:
-    dsomaout = {}
-    for host in range(int(pc.nhost())):
-      pc.take(host)
-      dsoma_node = pc.upkpyobj()
-      for k,v in dsoma_node.items(): dsomaout[k] = v
-    dsomaout['vtime'] = t_vec.to_python()
-    # print('dsomaout.keys():',dsomaout.keys(),'file:',doutf['file_vsoma'])
-    pickle.dump(dsomaout,open(doutf['file_vsoma'],'wb'))
-
+  for k,v in net.get_vsoma().items(): dsomaout[k] = v
+  dsomaout['vtime'] = t_vec.to_python()
+  pickle.dump(dsomaout,open(doutf['file_vsoma'],'wb'))
 #
 def savedat (p, rank, t_vec, dp_rec_L2, dp_rec_L5, net):
   global doutf
@@ -228,8 +210,6 @@ expmt_group = p_exp.expmt_groups[0]
 
 simparams = p = p_exp.return_pdict(expmt_group, 0) # return the param dict for this simulation
 
-pc.barrier() # get all nodes to this place before continuing
-pc.gid_clear()
 
 # global variables, should be node-independent
 h("dp_total_L2 = 0."); h("dp_total_L5 = 0.")
@@ -280,7 +260,6 @@ def arrangelayers ():
 
 arrangelayers() # arrange cells in layers - for visualization purposes
 
-pc.barrier()
 
 # save spikes from the individual trials in a single file
 def catspks ():
@@ -368,7 +347,6 @@ def initrands (s=0): # fix to use s
       # Create a random seed value
       r.x[0] = prng_tmp.randint(1e9)
   else: r = h.Vector(1, s) # create the vector 'r' but don't change its init value
-  pc.broadcast(r, 0) # broadcast random seed value in r to everyone
   # set object prngbase to random state for the seed value
   # other random seeds here will then be based on the gid
   prng_base = np.random.RandomState(int(r.x[0]))
@@ -385,10 +363,10 @@ initrands(0) # init once
 def setupLFPelectrodes ():
   lelec = []
   if testlaminarLFP:
-    for y in np.linspace(1466.0,-72.0,16): lelec.append(LFPElectrode([370.0, y, 450.0], pc = pc))
+    for y in np.linspace(1466.0,-72.0,16): lelec.append(LFPElectrode([370.0, y, 450.0]))
   elif testLFP:
-    lelec.append(LFPElectrode([370.0, 1050.0, 450.0], pc = pc))
-    lelec.append(LFPElectrode([370.0, 208.0, 450.0], pc = pc))
+    lelec.append(LFPElectrode([370.0, 1050.0, 450.0]))
+    lelec.append(LFPElectrode([370.0, 208.0, 450.0]))
   return lelec
 
 lelec = setupLFPelectrodes()
@@ -397,7 +375,7 @@ lelec = setupLFPelectrodes()
 def runsim ():
   t0 = time.time() # clock start time
 
-  pc.set_maxstep(10) # sets the default max solver step in ms (purposefully large)
+  h.cvode.maxstep(10) # sets the default max solver step in ms (purposefully large)
 
   for elec in lelec:
     elec.setup()
@@ -409,18 +387,10 @@ def runsim ():
   
   h.fcurrent()  
   h.frecord_init() # set state variables if they have been changed since h.finitialize
-  pc.psolve(h.tstop) # actual simulation - run the solver
-  pc.barrier()
+  h.continuerun(h.tstop) # actual simulation - run the solver
 
-  # these calls aggregate data across procs/nodes
-  pc.allreduce(dp_rec_L2, 1); 
-  pc.allreduce(dp_rec_L5, 1) # combine dp_rec on every node, 1=add contributions together  
   for elec in lelec: elec.lfp_final()
   net.aggregate_currents() # aggregate the currents independently on each proc
-  # combine net.current{} variables on each proc
-  pc.allreduce(net.current['L5Pyr_soma'], 1); pc.allreduce(net.current['L2Pyr_soma'], 1)
-
-  pc.barrier()
 
   # write time and calculated dipole to data file only if on the first proc
   # only execute this statement on one proc
@@ -435,12 +405,8 @@ def runsim ():
       runanalysis(p, doutf['file_param'], doutf['file_dpl_norm'], doutf['file_spec']) # run spectral analysis
     if paramrw.find_param(doutf['file_param'],'save_figs'): savefigs(ddir,p,p_exp) # save output figures
 
-  pc.barrier() # make sure all done in case multiple trials
-
 if __name__ == "__main__":
   if dconf['dorun']:
     if ntrial > 1: runtrials(ntrial,p['inc_evinput'])
     else: runsim()
-    pc.runworker()
-    pc.done()
   if dconf['doquit']: h.quit()

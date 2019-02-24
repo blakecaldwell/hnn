@@ -6,6 +6,7 @@
 
 import numpy as np
 from neuron import h
+from config import pc # for h.ParallelContext()
 
 # global variables, should be node-independent
 h("dp_total_L2 = 0."); h("dp_total_L5 = 0.") # put here since these variables used in cells
@@ -18,7 +19,6 @@ class Cell ():
 
     def __init__ (self, gid, soma_props):
       self.gid = gid
-      self.pc = h.ParallelContext() # Parallel methods
       # make L_soma and diam_soma elements of self
       # Used in shape_change() b/c func clobbers self.soma.L, self.soma.diam
       self.L = soma_props['L']
@@ -249,7 +249,7 @@ class Cell ():
     # parallel receptor-centric connect FROM presyn TO this cell, based on GID
     def parconnect_from_src (self, gid_presyn, nc_dict, postsyn):
       # nc_dict keys are: {pos_src, A_weight, A_delay, lamtha}
-      nc = self.pc.gid_connect(gid_presyn, postsyn)
+      nc = pc.gid_connect(gid_presyn, postsyn)
       # calculate distance between cell positions with pardistance()
       d = self.__pardistance(nc_dict['pos_src'])
       # set props here

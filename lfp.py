@@ -19,6 +19,7 @@ from neuron import h
 from math import sqrt, log, pi, exp
 from seg3d import *
 from pylab import *
+from config import pc # for h.ParallelContext()
 
 # get all Sections
 def getallSections (ty='Pyr'):
@@ -98,7 +99,7 @@ def transfer_resistance2 (exyz):
 # represents a simple LFP electrode
 class LFPElectrode ():
 
-  def __init__ (self, coord, sigma = 3.0, pc = None, usePoint = True):
+  def __init__ (self, coord, sigma = 3.0, usePoint = True):
 
     self.sigma = sigma # extracellular conductivity in mS/cm (uniform for simplicity)
     # see http://jn.physiology.org/content/104/6/3388.long shows table of values with conductivity
@@ -108,9 +109,6 @@ class LFPElectrode ():
 
     self.imem_ptrvec = self.imem_vec = self.rx = self.vx = self.vres = None
     self.bscallback = self.fih = None
-
-    if pc is None: self.pc = h.ParallelContext()
-    else: self.pc = pc
 
   def setup (self):
     h.cvode.use_fast_imem(1) # enables fast calculation of transmembrane current (nA) at each segment 
@@ -180,7 +178,7 @@ class LFPElectrode ():
   def LFPinit (self):
     lsec = getallSections()
     n = len(lsec)
-    # print('In LFPinit - pc.id = ',self.pc.id(),'len(lsec)=',n)
+    # print('In LFPinit - pc.id = ',pc.id(),'len(lsec)=',n)
     self.imem_ptrvec = h.PtrVector(n) # 
     self.imem_vec = h.Vector(n)  
     for i,s in enumerate(lsec):
@@ -203,7 +201,7 @@ class LFPElectrode ():
     #  #rx.setval(i,1,1.0)
 
   def callback (self):
-    # print('In lfp callback - pc.id = ',self.pc.id(),' t=',self.pc.t(0))
+    # print('In lfp callback - pc.id = ',pc.id(),' t=',pc.t(0))
     self.imem_ptrvec.gather(self.imem_vec)
     #s = pc.allreduce(imem_vec.sum(), 1) #verify sum i_membrane_ == stimulus
     #if rank == 0: print pc.t(0), s
@@ -215,16 +213,14 @@ class LFPElectrode ():
     for j in range(len(self.vres)): val += self.imem_vec.x[j] * self.vres.x[j]
 
     # append to Vector
-    self.lfp_t.append(self.pc.t(0))
+    self.lfp_t.append(pc.t(0))
     self.lfp_v.append(val)
 
-  def lfp_final (self):
-    self.pc.allreduce(self.lfp_v, 1)
 
   def lfpout (self,fn = 'LFP.txt', append=False, tvec = None):
     fmode = 'w'
     if append: fmode = 'a'
-    if int(self.pc.id()) == 0:
+    if int(pc.id()) == 0:
       print('len(lfp_t) is %d' % len(self.lfp_t))
       f = open(fn, fmode)
       if tvec is None:
@@ -255,11 +251,9 @@ def test ():
 
   h.tstop=2000.0
 
-  elec = LFPElectrode([0, 100.0, 100.0], pc = h.ParallelContext())
+  elec = LFPElectrode([0, 100.0, 100.0])
   elec.setup()
   elec.LFPinit()
-  h.run()
-  elec.lfp_final()
   ion()
   plot(elec.lfp_t, elec.lfp_v)
   
