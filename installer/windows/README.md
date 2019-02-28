@@ -6,8 +6,8 @@ This guide describes installing HNN on Windows 10 using Docker. This method will
 ## Prerequisite: Hyper-V support
 The Hyper-V feature must be enabled on your computer to use the Docker-based installation. Not all systems support this feature, and it may require making changes to your computer's BIOS settings. If you run into problems enabling Hyper-V, we recommend that you follow the [native install instructions](native_install.md) instead. You can check whether it is enabled with the following procedure.
 
-1. Open the Control Panel "Turn Windows features on or off" (search bar next to start menu).
-2. Make sure that Hyper-V is turned on as in the image below
+1. Start typing "Turn Windows features on or off" in the search bar next to start menu and click on it to launch the control panel dialog window shown below.
+2. Make sure that "Hyper-V" and "Hyper-V Platform" is turned on as shown in the image below
 
     <img src="install_pngs/hyper-V.png" height="200" />
 
