@@ -1,1 +1,4 @@
 theme: jekyll-theme-minimal
+title: HNN
+logo: res/icon.png
+show_downloads: true
