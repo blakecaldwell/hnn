@@ -7,7 +7,7 @@
 import sys
 import numpy as np
 
-from neuron import h
+from neuron import h, gui
 from cell import Pyr
 import paramrw
 import params_default as p_default
@@ -60,7 +60,7 @@ class L5Pyr(Pyr):
         p_all_default = p_default.get_L5Pyr_params_default()
         self.p_all = paramrw.compare_dictionaries(p_all_default, p)
 
-        # Get somatic, dendirtic, and synapse properties
+        # Get somatic, dendritic, and synapse properties
         p_soma = self.__get_soma_props(pos)
         p_dend = self.__get_dend_props()
         p_syn = self.__get_syn_props()
@@ -96,7 +96,7 @@ class L5Pyr(Pyr):
     # temporarily an external function taking the p dict
     def create_all_IClamp(self, p):
         # list of sections for this celltype
-        sect_list_IClamp = ['soma',]
+        sect_list_IClamp = ['apical_tuft']
 
         # some parameters
         t_delay = p['Itonic_t0_L5Pyr_soma']
@@ -285,12 +285,12 @@ class L5Pyr(Pyr):
         # set soma biophysics specified in Pyr
         # self.pyr_biophys_soma()
 
-        # Insert 'hh2' mechanism
-        self.soma.insert('hh2')
-        self.soma.gkbar_hh2 = self.p_all['L5Pyr_soma_gkbar_hh2']
-        self.soma.gnabar_hh2 = self.p_all['L5Pyr_soma_gnabar_hh2']
-        self.soma.gl_hh2 = self.p_all['L5Pyr_soma_gl_hh2']
-        self.soma.el_hh2 = self.p_all['L5Pyr_soma_el_hh2']
+        # Insert 'hh' mechanism
+        self.soma.insert('hh')
+        self.soma.gkbar_hh = self.p_all['L5Pyr_soma_gkbar_hh']
+        self.soma.gnabar_hh = self.p_all['L5Pyr_soma_gnabar_hh']
+        self.soma.gl_hh = self.p_all['L5Pyr_soma_gl_hh']
+        self.soma.el_hh = self.p_all['L5Pyr_soma_el_hh']
 
         # insert 'ca' mechanism
         # Units: pS/um^2
@@ -320,18 +320,29 @@ class L5Pyr(Pyr):
         self.soma.insert('ar')
         self.soma.gbar_ar = self.p_all['L5Pyr_soma_gbar_ar']
 
+        # self.soma.gkbar_hh = 0.01
+        # self.soma.gnabar_hh = 0.16
+        # self.soma.gl_hh = 4.26e-5
+        # self.soma.el_hh = -65.
+        # self.soma.gbar_ca = 60.
+        # self.soma.taur_cad = 20.
+        # self.soma.gbar_kca = 2e-4
+        # self.soma.gbar_km = 200.
+        # self.soma.gbar_cat = 2e-4
+        # self.soma.gbar_ar = 1e-6
+
     def __biophys_dends(self):
         # set dend biophysics specified in Pyr()
         # self.pyr_biophys_dends()
 
         # set dend biophysics not specified in Pyr()
         for key in self.dends:
-            # Insert 'hh2' mechanism
-            self.dends[key].insert('hh2')
-            self.dends[key].gkbar_hh2 = self.p_all['L5Pyr_dend_gkbar_hh2']
-            self.dends[key].gl_hh2 = self.p_all['L5Pyr_dend_gl_hh2']
-            self.dends[key].gnabar_hh2 = self.p_all['L5Pyr_dend_gnabar_hh2']
-            self.dends[key].el_hh2 = self.p_all['L5Pyr_dend_el_hh2']
+            # Insert 'hh' mechanism
+            self.dends[key].insert('hh')
+            self.dends[key].gkbar_hh = self.p_all['L5Pyr_dend_gkbar_hh']
+            self.dends[key].gl_hh = self.p_all['L5Pyr_dend_gl_hh']
+            self.dends[key].gnabar_hh = self.p_all['L5Pyr_dend_gnabar_hh']
+            self.dends[key].el_hh = self.p_all['L5Pyr_dend_el_hh']
 
             # Insert 'ca' mechanims
             # Units: pS/um^2
@@ -368,11 +379,69 @@ class L5Pyr(Pyr):
         h.distance(sec=self.soma)
 
         for key in self.dends:
+            self.dends[key].insert('ca')
+            self.dends[key].insert('cat')
             self.dends[key].push()
             for seg in self.dends[key]:
                 seg.gbar_ar = 1e-6 * np.exp(3e-3 * h.distance(seg.x))
+                # seg.gbar_ca = self.p_all['L5Pyr_dend_gbar_ca'] * 1.3 * np.exp(6e-4 * h.distance(seg.x))
+                # seg.gbar_ca += self.p_all['L5Pyr_dend_gbar_ca'] * -0.0001 * np.exp(0.010*h.distance(seg.x)-0.0094*h.distance(sec=self.dends['apical_2'])+6.659)
+                # seg.gbar_cat = self.p_all['L5Pyr_dend_gbar_cat'] * 1.5 * np.exp(3e-4 * h.distance(seg.x))
 
             h.pop_section()
+
+            # self.dends[key].gkbar_hh = 0.01
+            # self.dends[key].gl_hh = 4.26e-5
+            # self.dends[key].gnabar_hh = 0.14
+            # self.dends[key].el_hh = -71
+            # self.dends[key].gbar_ca = 60.
+            # self.dends[key].taur_cad = 20.
+            # self.dends[key].gbar_kca = 2e-4
+            # self.dends[key].gbar_km = 200.
+            #     seg.gbar_ar = 1e-6 * np.exp(3e-3 * h.distance(seg.x))
+            #     seg.gbar_cat = 2e-4 * np.exp(0 * h.distance(seg.x))
+
+        # for sec in self.list_dend:
+        #     # Insert 'hh' mechanism
+        #     sec.insert('hh')
+        #     sec.gkbar_hh = 0.01
+        #     sec.gl_hh = 4.26e-5
+        #     sec.gnabar_hh = 0.14
+        #     sec.el_hh = -71
+
+        #     # Insert 'ca' mechanims
+        #     # Units: pS/um^2
+        #     sec.insert('ca')
+        #     sec.gbar_ca = 60.
+
+        #     # Insert 'cad' mechanism
+        #     sec.insert('cad')
+        #     sec.taur_cad = 20.
+
+        #     # Insert 'kca' mechanism
+        #     sec.insert('kca')
+        #     sec.gbar_kca = 2e-4
+
+        #     # Insert 'km' mechansim
+        #     # Units: pS/um^2
+        #     sec.insert('km')
+        #     sec.gbar_km = 200.
+
+        #     # insert 'cat' and 'ar' mechanisms
+        #     sec.insert('cat')
+        #     sec.insert('ar')
+
+        # h.distance(sec=self.soma)
+
+        # for sec in self.list_dend:
+        #     sec.push()
+        #     for seg in sec:
+        #         seg.gbar_ar = 1e-6 * np.exp(3e-3 * h.distance(seg.x))
+
+        #         # this should always evaluate to 2e-4
+        #         sec.gbar_cat = 2e-4 * np.exp(0 * h.distance(seg.x))
+
+        #     h.pop_section()
 
     def __synapse_create(self, p_syn):
         # creates synapses onto this cell
@@ -383,9 +452,8 @@ class L5Pyr(Pyr):
         }
 
         # Dendritic synapses
-        self.apicaltuft_gabaa = self.syn_create(self.dends['apical_tuft'](0.5), p_syn['gabaa'])
-        #self.apicaltuft_gabaa = self.syn_create(self.dends['apical_tuft'](0.5), p_syn['gabab'])#RL version
-
+        #self.apicaltuft_gabaa = self.syn_create(self.dends['apical_tuft'](0.5), p_syn['gabaa'])
+        self.apicaltuft_gabaa = self.syn_create(self.dends['apical_tuft'](0.5), p_syn['gabab'])
         self.apicaltuft_ampa = self.syn_create(self.dends['apical_tuft'](0.5), p_syn['ampa'])
         self.apicaltuft_nmda = self.syn_create(self.dends['apical_tuft'](0.5), p_syn['nmda'])
 
@@ -416,8 +484,6 @@ class L5Pyr(Pyr):
                     'A_weight': p['gbar_L5Pyr_L5Pyr_ampa'],
                     'A_delay': 1.,
                     'lamtha': 3.,
-                    'threshold': p['threshold'],
-                    'type_src' : 'L5_pyramidal'
                 }
 
                 # ampa connections
@@ -430,8 +496,6 @@ class L5Pyr(Pyr):
                     'A_weight': p['gbar_L5Pyr_L5Pyr_nmda'],
                     'A_delay': 1.,
                     'lamtha': 3.,
-                    'threshold': p['threshold'],
-                    'type_src' : 'L5_pyramidal'
                 }
 
                 # nmda connections
@@ -446,8 +510,6 @@ class L5Pyr(Pyr):
                 'A_weight': p['gbar_L5Basket_L5Pyr_gabaa'],
                 'A_delay': 1.,
                 'lamtha': 70.,
-                'threshold': p['threshold'],
-                'type_src' : 'L5_basket'
             }
 
             nc_dict['gabab'] = {
@@ -455,8 +517,6 @@ class L5Pyr(Pyr):
                 'A_weight': p['gbar_L5Basket_L5Pyr_gabab'],
                 'A_delay': 1.,
                 'lamtha': 70.,
-                'threshold': p['threshold'],
-                'type_src' : 'L5_basket'
             }
 
             # soma synapses are defined in Pyr()
@@ -471,8 +531,6 @@ class L5Pyr(Pyr):
                 'A_weight': p['gbar_L2Pyr_L5Pyr'],
                 'A_delay': 1.,
                 'lamtha': 3.,
-                'threshold': p['threshold'],
-                'type_src' : 'L2_pyramidal'
             }
 
             self.ncfrom_L2Pyr.append(self.parconnect_from_src(gid_src, nc_dict, self.basal2_ampa))
@@ -487,8 +545,6 @@ class L5Pyr(Pyr):
                 'A_weight': p['gbar_L2Basket_L5Pyr'],
                 'A_delay': 1.,
                 'lamtha': 50.,
-                'threshold': p['threshold'],
-                'type_src' : 'L2_basket'
             }
 
             self.ncfrom_L2Basket.append(self.parconnect_from_src(gid_src, nc_dict, self.apicaltuft_gabaa))
@@ -502,9 +558,7 @@ class L5Pyr(Pyr):
                     'pos_src': pos,
                     'A_weight': p_src['L5Pyr_ampa'][0],
                     'A_delay': p_src['L5Pyr_ampa'][1],
-                    'lamtha': p_src['lamtha'],
-                    'threshold': p_src['threshold'],
-                    'type_src' : 'ext'
+                    'lamtha': p_src['lamtha']
                 }
 
                 # Proximal feed AMPA synapses
@@ -513,6 +567,7 @@ class L5Pyr(Pyr):
                     self.ncfrom_extinput.append(self.parconnect_from_src(gid_src, nc_dict_ampa, self.basal2_ampa))
                     self.ncfrom_extinput.append(self.parconnect_from_src(gid_src, nc_dict_ampa, self.basal3_ampa))
                     self.ncfrom_extinput.append(self.parconnect_from_src(gid_src, nc_dict_ampa, self.apicaloblique_ampa))
+
                 # Distal feed AMPA synsapes
                 elif p_src['loc'] is 'distal':
                     # apical tuft
@@ -524,9 +579,7 @@ class L5Pyr(Pyr):
                     'pos_src': pos,
                     'A_weight': p_src['L5Pyr_nmda'][0],
                     'A_delay': p_src['L5Pyr_nmda'][1],
-                    'lamtha': p_src['lamtha'],
-                    'threshold': p_src['threshold'],
-                    'type_src' : 'ext'
+                    'lamtha': p_src['lamtha']
                 }
 
                 # Proximal feed NMDA synapses
@@ -535,6 +588,7 @@ class L5Pyr(Pyr):
                     self.ncfrom_extinput.append(self.parconnect_from_src(gid_src, nc_dict_nmda, self.basal2_nmda))
                     self.ncfrom_extinput.append(self.parconnect_from_src(gid_src, nc_dict_nmda, self.basal3_nmda))
                     self.ncfrom_extinput.append(self.parconnect_from_src(gid_src, nc_dict_nmda, self.apicaloblique_nmda))
+
                 # Distal feed NMDA synsapes
                 elif p_src['loc'] is 'distal':
                     # apical tuft
@@ -547,40 +601,24 @@ class L5Pyr(Pyr):
             if self.celltype in p_ext.keys():
                 gid_ev = gid + gid_dict[type][0]
 
-                nc_dict_ampa = {
+                nc_dict = {
                     'pos_src': pos_dict[type][gid],
-                    'A_weight': p_ext[self.celltype][0], # index 0 for ampa weight
-                    'A_delay': p_ext[self.celltype][2], # index 2 for delay
-                    'lamtha': p_ext['lamtha_space'],
-                    'threshold': p_ext['threshold'],
-                    'type_src' : type
-                }
-
-                nc_dict_nmda = {
-                    'pos_src': pos_dict[type][gid],
-                    'A_weight': p_ext[self.celltype][1], # index 1 for nmda weight
-                    'A_delay': p_ext[self.celltype][2], # index 2 for delay
-                    'lamtha': p_ext['lamtha_space'],
-                    'threshold': p_ext['threshold'],
-                    'type_src' : type
+                    'A_weight': p_ext[self.celltype][0],
+                    'A_delay': p_ext[self.celltype][1],
+                    'lamtha': p_ext['lamtha_space']
                 }
 
                 #print('L5pyr:',type,'w:',nc_dict['A_weight'])
 
                 if p_ext['loc'] is 'proximal':
-                    self.ncfrom_ev.append(self.parconnect_from_src(gid_ev, nc_dict_ampa, self.basal2_ampa))
-                    self.ncfrom_ev.append(self.parconnect_from_src(gid_ev, nc_dict_ampa, self.basal3_ampa))
-                    self.ncfrom_ev.append(self.parconnect_from_src(gid_ev, nc_dict_ampa, self.apicaloblique_ampa))
-
-                    # NEW: note that default/original is 0 nmda weight for these proximal dends
-                    self.ncfrom_ev.append(self.parconnect_from_src(gid_ev, nc_dict_nmda, self.basal2_nmda))
-                    self.ncfrom_ev.append(self.parconnect_from_src(gid_ev, nc_dict_nmda, self.basal3_nmda))
-                    self.ncfrom_ev.append(self.parconnect_from_src(gid_ev, nc_dict_nmda, self.apicaloblique_nmda))
+                    self.ncfrom_ev.append(self.parconnect_from_src(gid_ev, nc_dict, self.basal2_ampa))
+                    self.ncfrom_ev.append(self.parconnect_from_src(gid_ev, nc_dict, self.basal3_ampa))
+                    self.ncfrom_ev.append(self.parconnect_from_src(gid_ev, nc_dict, self.apicaloblique_ampa))
 
                 elif p_ext['loc'] is 'distal':
                     # apical tuft
-                    self.ncfrom_ev.append(self.parconnect_from_src(gid_ev, nc_dict_ampa, self.apicaltuft_ampa))
-                    self.ncfrom_ev.append(self.parconnect_from_src(gid_ev, nc_dict_nmda, self.apicaltuft_nmda))
+                    self.ncfrom_ev.append(self.parconnect_from_src(gid_ev, nc_dict, self.apicaltuft_ampa))
+                    self.ncfrom_ev.append(self.parconnect_from_src(gid_ev, nc_dict, self.apicaltuft_nmda))
 
         elif type == 'extgauss':
             # gid is this cell's gid
@@ -597,11 +635,9 @@ class L5Pyr(Pyr):
 
                 nc_dict = {
                     'pos_src': pos_dict['extgauss'][gid],
-                    'A_weight': p_ext['L5_pyramidal'][0], # index 0 for ampa weight
-                    'A_delay': p_ext['L5_pyramidal'][2], # index 2 for delay
-                    'lamtha': p_ext['lamtha'],
-                    'threshold': p_ext['threshold'],
-                    'type_src' : type
+                    'A_weight': p_ext['L5_pyramidal'][0],
+                    'A_delay': p_ext['L5_pyramidal'][1],
+                    'lamtha': p_ext['lamtha']
                 }
 
                 self.ncfrom_extgauss.append(self.parconnect_from_src(gid_extgauss, nc_dict, self.basal2_ampa))
@@ -614,22 +650,14 @@ class L5Pyr(Pyr):
 
                 nc_dict = {
                     'pos_src': pos_dict['extpois'][gid],
-                    'A_weight': p_ext[self.celltype][0], # index 0 for ampa weight
-                    'A_delay': p_ext[self.celltype][2], # index 2 for delay
-                    'lamtha': p_ext['lamtha_space'],
-                    'threshold': p_ext['threshold'],
-                    'type_src' : type
+                    'A_weight': p_ext[self.celltype][0],
+                    'A_delay': p_ext[self.celltype][1],
+                    'lamtha': p_ext['lamtha_space']
                 }
 
                 self.ncfrom_extpois.append(self.parconnect_from_src(gid_extpois, nc_dict, self.basal2_ampa))
                 self.ncfrom_extpois.append(self.parconnect_from_src(gid_extpois, nc_dict, self.basal3_ampa))
                 self.ncfrom_extpois.append(self.parconnect_from_src(gid_extpois, nc_dict, self.apicaloblique_ampa))
-
-                if p_ext[self.celltype][1] > 0.0:
-                  nc_dict['A_weight'] = p_ext[self.celltype][1] # index 1 for nmda weight
-                  self.ncfrom_extpois.append(self.parconnect_from_src(gid_extpois, nc_dict, self.basal2_nmda))
-                  self.ncfrom_extpois.append(self.parconnect_from_src(gid_extpois, nc_dict, self.basal3_nmda))
-                  self.ncfrom_extpois.append(self.parconnect_from_src(gid_extpois, nc_dict, self.apicaloblique_nmda))
 
     # Define 3D shape and position of cell. By default neuron uses xy plane for
     # height and xz plane for depth. This is opposite for model as a whole, but
@@ -718,3 +746,24 @@ class L5Pyr(Pyr):
                            self.pos[1] * 100 + h.z3d(i), h.diam3d(i))
 
         h.pop_section()
+
+##    def compartments_record(self):
+##        # Record voltages
+##        ca_vec = h.Vector()
+##        t_vec = h.Vector()
+##        ca_vec.record(self.soma(0.5)._ref_cai)  # change later to record from all sections
+##        t_vec.record(h._ref_t)
+##        simdur = 350.0
+##
+##        h.tstop = simdur
+##        h.run()
+##
+##        from matplotlib import pyplot
+##        pyplot.figure(figsize=(8,4))
+##        pyplot.plot(t_vec, ca_vec)
+##        pyplot.xlabel("time (ms)")
+##        pyplot.ylabel("calcium current (nA)")
+##        pyplot.show()
+
+    # where in the code do I implement this? network.py? Also, how do I use HNN gui instead of NEURON gui?
+       
