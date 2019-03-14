@@ -1,4 +1,4 @@
-theme: minima
+theme: jekyll-theme-cayman
 title: HNN
-logo: assets/specto_test.png
 show_downloads: true
+
