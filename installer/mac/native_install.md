@@ -102,7 +102,7 @@ Please reboot your system before proceeding. A reboot is really needed after ins
 ## Run the HNN model
 1. Start the HNN GUI from a terminal window:
     ```
-    conda activate hnn
+    source activate hnn
     python hnn.py hnn.cfg
     ```
 2. The HNN GUI should appear and you should now be able to run the tutorials at https://hnn.brown.edu/index.php/tutorials/
