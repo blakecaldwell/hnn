@@ -32,7 +32,7 @@ open /Applications/Utilities/XQuartz.app
 1. Run the commands below from a terminal window (as a regular user) or download and install miniconda from the link: https://conda.io/en/latest/miniconda.html. This will create a python environment isolated from other installations on the system (e.g. those installed using homebrew). You could use `brew install python3` if you wish (has been tested with HNN), but this guide will cover the miniconda version.
     ```
     cd /tmp/
-    curl https://repo.anaconda.com/miniconda/ -o Miniconda3-latest-MacOSX-x86_64.sh
+    curl -O https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
     sh ./Miniconda3-latest-MacOSX-x86_64.sh -b
     rm /tmp/Miniconda3-latest-MacOSX-x86_64.sh
     ```
@@ -55,7 +55,7 @@ open /Applications/Utilities/XQuartz.app
 
 ## Prepare the Python environment
 
-1. Create a conda environment with the Python prerequisites for HNN.
+1. Open a new terminal winodw and run the command below to create a conda environment with the Python prerequisites for HNN.
 
     ```
     conda create -n hnn python=3.6 mpi4py pyqtgraph pyopengl matplotlib scipy
