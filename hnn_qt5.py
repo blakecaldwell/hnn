@@ -783,6 +783,13 @@ class EvokedInputParamDialog (QDialog):
     self.btndist.setToolTip('Add Distal Input')
     self.button_box.addWidget(self.btndist)
 
+    self.btnfile = QPushButton('Add Input Spikes from File',self)
+    self.btnfile.resize(self.btnfile.sizeHint())
+    self.btnfile.clicked.connect(self.addFile)
+    self.btnfile.setToolTip('Add Input Spikes from File')
+    self.button_box.addWidget(self.btnfile)
+
+
     self.chksync = QCheckBox('Synchronous Inputs',self)
     self.chksync.resize(self.chksync.sizeHint())
     self.chksync.setChecked(True)
@@ -823,7 +830,7 @@ class EvokedInputParamDialog (QDialog):
 
   def removeAllInputs (self):
     for i in range(len(self.ltabs)): self.removeCurrentInput()
-    self.nprox = self.ndist = 0
+    self.nfile = self.nprox = self.ndist = 0
 
   def IsProx (self,idx):
     # is this evoked input proximal (True) or distal (False) ?
@@ -972,6 +979,32 @@ class EvokedInputParamDialog (QDialog):
         self.addtransvar(k,'Start time stdev (ms)')
       elif k.startswith('numspikes'):
         self.addtransvar(k,'Number spikes')
+      elif k.startswith('filename'):
+        self.addtransvar(k,'Filename of spike times')
+      elif k.startswith('f_sigma'):
+        self.addtransvar(k,'Spike time stdev (ms)')
+
+  def addFile (self):
+    self.nfile += 1 # starts at 1
+    dfile = OrderedDict([('filename_' + str(self.nfile), ""),
+                         ('f_sigma' + str(self.nfile), 0.),
+                         ('numspikes_evfile_' + str(self.nfile), 1),
+                         ('gbar_evfile_' + str(self.nfile) + '_L2Pyr_ampa', 0.),
+                         ('gbar_evfile_' + str(self.nfile) + '_L2Pyr_nmda', 0.),
+                         ('gbar_evfile_' + str(self.nfile) + '_L2Basket_ampa', 0.),
+                         ('gbar_evfile_' + str(self.nfile) + '_L2Basket_nmda', 0.),
+                         ('gbar_evfile_' + str(self.nfile) + '_L5Pyr_ampa', 0.),
+                         ('gbar_evfile_' + str(self.nfile) + '_L5Pyr_nmda', 0.),
+                         ('gbar_evfile_' + str(self.nfile) + '_L5Basket_ampa', 0.),
+                         ('gbar_evfile_' + str(self.nfile) + '_L5Basket_nmda', 0.)])
+    self.ld.append(dfile)
+    self.addtransvarfromdict(dfile)
+    self.addFormToTab(dfile, self.addTab(True,'File ' + str(self.nfile)))
+    #self.ltabs[-1].layout.addRow(self.makePixLabel(lookupresource('proxfig')))
+    #print('index to', len(self.ltabs)-1)
+    self.tabs.setCurrentIndex(len(self.ltabs)-1)
+    #print('index now', self.tabs.currentIndex(), ' of ', self.tabs.count())
+    self.addtips()
 
   def addProx (self):
     self.nprox += 1 # starts at 1
@@ -983,18 +1016,14 @@ class EvokedInputParamDialog (QDialog):
                          ('gbar_evprox_' + str(self.nprox) + '_L2Pyr_nmda', 0.),
                          ('gbar_evprox_' + str(self.nprox) + '_L2Basket_ampa', 0.),
                          ('gbar_evprox_' + str(self.nprox) + '_L2Basket_nmda', 0.),
-                         ('gbar_evprox_' + str(self.nprox) + '_L5Pyr_ampa', 0.),                                   
-                         ('gbar_evprox_' + str(self.nprox) + '_L5Pyr_nmda', 0.),                                   
+                         ('gbar_evprox_' + str(self.nprox) + '_L5Pyr_ampa', 0.),
+                         ('gbar_evprox_' + str(self.nprox) + '_L5Pyr_nmda', 0.),
                          ('gbar_evprox_' + str(self.nprox) + '_L5Basket_ampa', 0.),
                          ('gbar_evprox_' + str(self.nprox) + '_L5Basket_nmda', 0.)])
     self.ld.append(dprox)
     self.addtransvarfromdict(dprox)
     self.addFormToTab(dprox, self.addTab(True,'Proximal ' + str(self.nprox)))
     self.ltabs[-1].layout.addRow(self.makePixLabel(lookupresource('proxfig')))
-    #print('index to', len(self.ltabs)-1)
-    self.tabs.setCurrentIndex(len(self.ltabs)-1)
-    #print('index now', self.tabs.currentIndex(), ' of ', self.tabs.count())
-    self.addtips()
 
   def addDist (self):
     self.ndist += 1
