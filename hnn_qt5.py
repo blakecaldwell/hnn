@@ -4,7 +4,7 @@ import sys, os
 from PyQt5.QtWidgets import QMainWindow, QAction, qApp, QApplication, QToolTip, QPushButton, QFormLayout
 from PyQt5.QtWidgets import QMenu, QSizePolicy, QMessageBox, QWidget, QFileDialog, QComboBox, QTabWidget
 from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QGroupBox, QDialog, QGridLayout, QLineEdit, QLabel
-from PyQt5.QtWidgets import QCheckBox, QTextEdit, QInputDialog
+from PyQt5.QtWidgets import QCheckBox, QTextEdit, QInputDialog, QSpacerItem
 from PyQt5.QtGui import QIcon, QFont, QPixmap
 from PyQt5.QtCore import QCoreApplication, QThread, pyqtSignal, QObject, pyqtSlot, Qt
 from PyQt5 import QtCore
@@ -23,7 +23,7 @@ import random
 from math import ceil
 import spikefn
 import params_default
-from paramrw import quickreadprm, usingOngoingInputs, countEvokedInputs, usingEvokedInputs
+from paramrw import quickreadprm, usingOngoingInputs, countEvokedInputs, usingEvokedInputs, chunk_evinputs
 from simdat import SIMCanvas, getinputfiles, readdpltrials
 from gutils import scalegeom, scalefont, setscalegeom, lowresdisplay, setscalegeomcenter, getmplDPI, getscreengeom
 from ctune import expval, expvals, logval, logvals
@@ -1016,7 +1016,259 @@ class EvokedInputParamDialog (QDialog):
     self.tabs.setCurrentIndex(len(self.ltabs)-1)
     #print('index now', self.tabs.currentIndex(), ' of ', self.tabs.count())
     self.addtips()
-    
+
+class OptEvokedInputParamDialog (EvokedInputParamDialog):
+
+  def __init__ (self):
+    self.dqchkbox = OrderedDict()
+    super(EvokedInputParamDialog, self).__init__(None)
+    self.nprox = self.ndist = 0 # number of proximal,distal inputs
+    self.ld = [] # list of dictionaries for proximal/distal inputs
+    self.dqline = OrderedDict()
+    self.dqchkbox = OrderedDict()
+    self.dtransvar = {} # for translating model variable name to more human-readable form
+    self.simlength = 0.0
+    self.initUI()
+
+  def initUI (self):
+    self.ltabs = []
+    self.tabs = QTabWidget()
+
+    grid = QGridLayout()
+    grid.setSpacing(10)
+
+    row = 1
+
+    grid.addWidget(self.tabs, row, 1)
+
+    row += 1
+    btnrecalc = QPushButton('Recalculate ranges',self)
+    btnrecalc.resize(btnrecalc.sizeHint())
+    btnrecalc.clicked.connect(self.updateRanges)
+    btnrecalc.setToolTip('Recalculate ranges')
+    grid.addWidget(btnrecalc, row, 1)
+
+    row += 1
+    btnrunop = QPushButton('Run Optimization', self)
+    btnrunop.resize(btnrunop.sizeHint())
+    btnrunop.setToolTip('Run Optimization')
+    #btnrunop.clicked.connect(startoptmodel)
+    grid.addWidget(btnrunop, row, 1)
+
+    row += 1
+    btnhide = QPushButton('Hide Window',self)
+    btnhide.resize(btnhide.sizeHint())
+    btnhide.clicked.connect(self.hide)
+    btnhide.setToolTip('Hide Window')
+    grid.addWidget(btnhide, row, 1)
+
+    self.setLayout(grid)
+
+    size = self.sizeHint()
+    # add some extra space for text fields
+    size.setWidth(size.width()+520)
+    self.resize(size)
+
+    self.setWindowTitle("Evoked Input Parameter Optimization")
+
+  def toggle_field(self, current_tab, row):
+    if self.ltabs[current_tab].layout.itemAtPosition(row, 1).widget().isChecked():
+      for column in range(2,6):
+        self.ltabs[current_tab].layout.itemAtPosition(row, column).widget().setEnabled(True)
+    else:
+      for column in range(2,6):
+        self.ltabs[current_tab].layout.itemAtPosition(row, column).widget().setEnabled(False)
+
+  def addTab (self,prox,s):
+    tab = QWidget()
+    self.ltabs.append(tab)
+    self.tabs.addTab(tab,s)
+
+    return tab
+
+  def addGridToTab (self, d, tab):
+    from functools import partial
+    import re
+
+    current_tab = self.tabs.currentIndex()
+    tab.layout = QGridLayout()
+    #tab.layout.setSpacing(10)
+
+    # need stddev for calculating ranges
+    regex_match = re.match('([A-Za-z]+) ([0-9]+)',
+                           self.tabs.tabText(len(self.ltabs)-1))
+    if regex_match.group(1) == "Proximal":
+      input_type = "prox"
+    elif regex_match.group(1) == "Distal":
+      input_type = "dist"
+
+    timing_sigma = float(d['sigma_t_ev%s_%d' % \
+                         (input_type, int(regex_match.group(2)))])
+
+    row = 0
+    for k,v in d.items():
+      self.dqline[k] = QLineEdit(self)
+      self.dqline[k].setText(str(v))
+      self.dqchkbox[k] = QCheckBox(self.transvar(k),self)
+      self.dqchkbox[k].resize(self.dqchkbox[k].sizeHint())
+      self.dqchkbox[k].setStyleSheet("""
+      .QCheckBox {
+            spacing: 20px;
+          }
+      .QCheckBox::unchecked {
+            color: grey;
+          }
+      .QCheckBox::checked {
+            color: black;
+          }
+      """)
+      self.dqchkbox[k].setChecked(True)
+      # use partial instead of lamda (so args won't be evaluated ahead of time?)
+      self.dqchkbox[k].stateChanged.connect(partial(self.toggle_field,
+                                                    current_tab, row))
+      tab.layout.addWidget(self.dqchkbox[k], row, 1)
+      tab.layout.addWidget(self.dqline[k], row, 2)
+
+      if k.startswith('t'):
+        tab.layout.addWidget(QLabel("range (sd)"), row, 3)
+        tab.layout.addWidget(QLineEdit("2.0"), row, 4)
+        tab.layout.addWidget(QLabel(), row, 5)
+      else:
+        tab.layout.addWidget(QLabel("range (%)"), row, 3)
+        tab.layout.addWidget(QLineEdit("500"), row, 4)
+        tab.layout.addWidget(QLabel(), row, 5)
+      row += 1
+
+    # while row < 11:
+    #   tab.layout.addItem(QSpacerItem(tab.layout.sizeHint().width(),
+    #                                  self.dqline[k].sizeHint().height(),
+    #                                  vPolicy=QSizePolicy.Maximum),
+    #                                  row, 1, columnSpan=-1)
+    #   row += 1
+
+    tab.setLayout(tab.layout)
+
+  def addProx (self):
+    self.nprox += 1 # starts at 1
+    # evprox feed strength
+    dprox = OrderedDict([('t_evprox_' + str(self.nprox), 0.), # times and stdevs for evoked responses
+                         ('sigma_t_evprox_' + str(self.nprox), 2.5),
+                         #('numspikes_evprox_' + str(self.nprox), 1),
+                         ('gbar_evprox_' + str(self.nprox) + '_L2Pyr_ampa', 0.),
+                         ('gbar_evprox_' + str(self.nprox) + '_L2Pyr_nmda', 0.),
+                         ('gbar_evprox_' + str(self.nprox) + '_L2Basket_ampa', 0.),
+                         ('gbar_evprox_' + str(self.nprox) + '_L2Basket_nmda', 0.),
+                         ('gbar_evprox_' + str(self.nprox) + '_L5Pyr_ampa', 0.),                                   
+                         ('gbar_evprox_' + str(self.nprox) + '_L5Pyr_nmda', 0.),                                   
+                         ('gbar_evprox_' + str(self.nprox) + '_L5Basket_ampa', 0.),
+                         ('gbar_evprox_' + str(self.nprox) + '_L5Basket_nmda', 0.)])
+    self.ld.append(dprox)
+    self.addtransvarfromdict(dprox)
+    tab = self.addTab(True,'Proximal ' + str(self.nprox))
+    self.tabs.setCurrentIndex(len(self.ltabs)-1)
+    self.addGridToTab(dprox, tab)
+    self.addtips()
+
+  def addDist (self):
+    self.ndist += 1
+    # evdist feed strengths
+    ddist = OrderedDict([('t_evdist_' + str(self.ndist), 0.),
+                         ('sigma_t_evdist_' + str(self.ndist), 6.),
+                         #('numspikes_evdist_' + str(self.ndist), 1),
+                         ('gbar_evdist_' + str(self.ndist) + '_L2Pyr_ampa', 0.),
+                         ('gbar_evdist_' + str(self.ndist) + '_L2Pyr_nmda', 0.),
+                         ('gbar_evdist_' + str(self.ndist) + '_L2Basket_ampa', 0.),
+                         ('gbar_evdist_' + str(self.ndist) + '_L2Basket_nmda', 0.),
+                         ('gbar_evdist_' + str(self.ndist) + '_L5Pyr_ampa', 0.),
+                         ('gbar_evdist_' + str(self.ndist) + '_L5Pyr_nmda', 0.)])
+    self.ld.append(ddist)
+    self.addtransvarfromdict(ddist)
+    tab = self.addTab(True,'Distal ' + str(self.ndist))
+    self.tabs.setCurrentIndex(len(self.ltabs)-1)
+    self.addGridToTab(ddist, tab)
+    self.addtips()
+
+  def updateRanges(self):
+    # iterate through tabs. data is contained in grid layout
+    for index, tab in enumerate(self.ltabs):
+
+      # get timing sigma before calculating timing range
+      timing_sigma = None
+      for i in range(tab.layout.rowCount()):
+        if tab.layout.itemAtPosition(i, 1).widget().text().startswith("Start time stdev"):
+          timing_sigma = float(tab.layout.itemAtPosition(i, 2).widget().text())
+          break
+      if timing_sigma is None:
+        timing_sigma = 1.0
+        print("Couldn't fing timing_sigma. Using default %f"%timing_sigma)
+
+      # now update the ranges
+      for i in range(tab.layout.rowCount()):
+        label = tab.layout.itemAtPosition(i, 1).widget().text()
+        value = float(tab.layout.itemAtPosition(i, 2).widget().text())
+        try:
+          range_multiplier = float(tab.layout.itemAtPosition(i, 4).widget().text())
+        except ValueError:
+          # no range multiplier specified, so skip calculating range
+          continue
+
+        if label.startswith('t'):
+          timing_bound = timing_sigma * range_multiplier
+          timing_min = max(0, value - timing_bound)
+          timing_max = min(self.simlength, value + timing_bound)
+          tab.layout.itemAtPosition(i, 5).widget().setText("%.3f - %.3f" % (timing_min, timing_max))
+        else:
+          range_min = max(0,value - (value * range_multiplier/100.0))
+          range_max = value + (value * range_multiplier/100.0)
+          if range_min == range_max:
+            if range_min == 0.0:
+              tab.layout.itemAtPosition(i, 5).widget().setText("0.0")
+            else:
+              tab.layout.itemAtPosition(i, 5).widget().setText("%f" % range_min)
+          else:
+            tab.layout.itemAtPosition(i, 5).widget().setText("%f - %f" % (range_min, range_max))
+
+
+  def setfromdin (self,din):
+    if not din: return
+    self.removeAllInputs() # turn off any previously set inputs
+
+    # split chunks from paramter file that are seperated by more than 1 standard deviation
+    sd_range = 1.0
+    input_chunks = chunk_evinputs(din, sd_range)
+    for evinput in input_chunks:
+      if evinput['type'] == 'prox':
+        self.addProx()
+      elif evinput['type'] == 'dist':
+        self.addDist()
+      elif evinput['type'] == 'mixed':
+        for one_input in evinput['inputs']:
+          if 'evprox_' in one_input:
+            self.addProx()
+          elif 'evdist_' in one_input:
+            self.addDist()
+
+    self.simlength = din['tstop']
+    for k,v in din.items():
+      if k in self.dqline:
+        self.dqline[k].setText(str(v).strip())
+      elif k.count('gbar') > 0 and (k.count('evprox')>0 or k.count('evdist')>0): 
+        # for back-compat with old-style specification which didn't have ampa,nmda in evoked gbar
+        lks = k.split('_')
+        eloc = lks[1]
+        enum = lks[2]
+        if eloc == 'evprox':
+          for ct in ['L2Pyr','L2Basket','L5Pyr','L5Basket']:
+            # ORIGINAL MODEL/PARAM: only ampa for prox evoked inputs
+            self.dqline['gbar_'+eloc+'_'+enum+'_'+ct+'_ampa'].setText(str(v).strip()) 
+        elif eloc == 'evdist':
+          for ct in ['L2Pyr','L2Basket','L5Pyr']:
+            # ORIGINAL MODEL/PARAM: both ampa and nmda for distal evoked inputs
+            self.dqline['gbar_'+eloc+'_'+enum+'_'+ct+'_ampa'].setText(str(v).strip()) 
+            self.dqline['gbar_'+eloc+'_'+enum+'_'+ct+'_nmda'].setText(str(v).strip()) 
+
+    self.updateRanges()
+
 # widget to specify run params (tstop, dt, etc.) -- not many params here
 class RunParamDialog (DictDialog):
   def __init__ (self, parent, din = None):
@@ -1459,9 +1711,12 @@ class BaseParamDialog (QDialog):
     self.proxparamwin = OngoingInputParamDialog(self,'Proximal')
     self.distparamwin = OngoingInputParamDialog(self,'Distal')
     self.evparamwin = EvokedInputParamDialog(self,None)
+    self.optparamwin = OptEvokedInputParamDialog()
     self.poisparamwin = PoissonInputParamDialog(self,None)
     self.tonicparamwin = TonicInputParamDialog(self,None)
-    self.lsubwin = [self.runparamwin, self.cellparamwin, self.netparamwin, self.proxparamwin, self.distparamwin, self.evparamwin,self.poisparamwin, self.tonicparamwin]
+    self.lsubwin = [self.runparamwin, self.cellparamwin, self.netparamwin,
+                    self.proxparamwin, self.distparamwin, self.evparamwin,
+                    self.poisparamwin, self.tonicparamwin, self.optparamwin]
     self.updateDispParam()
 
   def updateDispParam (self):
@@ -1697,6 +1952,7 @@ class HNNGUI (QMainWindow):
     self.erselectdistal = EvokedOrRhythmicDialog(self, True, self.baseparamwin.evparamwin, self.baseparamwin.distparamwin)
     self.erselectprox = EvokedOrRhythmicDialog(self, False, self.baseparamwin.evparamwin, self.baseparamwin.proxparamwin)
     self.waitsimwin = WaitSimDialog(self)
+    self.m = self.toolbar = None
 
   def redraw (self):
     # redraw simulation & external data
@@ -1793,6 +2049,24 @@ class HNNGUI (QMainWindow):
                    "<a href=https://github.com/jonescompneurolab/hnn>HNN On Github</a><br>"+\
                    "© 2017-2019 <a href=http://brown.edu>Brown University, Providence, RI</a><br>"+\
                    "<a href=https://github.com/jonescompneurolab/hnn/blob/master/LICENSE>Software License</a>")
+    msgBox.setStandardButtons(QMessageBox.Ok)
+    msgBox.exec_()
+
+  def showOptWarnDialog (self):
+    # show HNN's about dialog box
+    from __init__ import __version__
+    nparam = 6
+    ncores = 4
+    hours = 3.3
+    pertrial = 22
+    trials = 3
+    nsteps = 30
+
+    msgBox = QMessageBox(self)
+    msgBox.setTextFormat(Qt.RichText)
+    msgBox.setWindowTitle('Warning')
+    msgBox.setText("You have selected %d parameters to optimize.<br>Even with %d cores, this will take %.1f hours to complete.<br>%.1fs per simulation * %d trials * %d steps * %d params"
+                   %(nparam,ncores,hours,pertrial,trials,nsteps,nparam))
     msgBox.setStandardButtons(QMessageBox.Ok)
     msgBox.exec_()
 
@@ -2021,11 +2295,10 @@ class HNNGUI (QMainWindow):
     runSimNSGAct.setStatusTip('Run simulation on Neuroscience Gateway Portal (requires NSG account and internet connection).')
     runSimNSGAct.triggered.connect(self.controlNSGsim)
 
-    if dconf['optrun']:
-      optSimAct = QAction('Optimize model', self)
-      optSimAct.setShortcut('Ctrl+O')
-      optSimAct.setStatusTip('Optimize Model')
-      optSimAct.triggered.connect(self.startoptmodel)
+    optSimAct = QAction('Optimize model', self)
+    optSimAct.setShortcut('Ctrl+O')
+    optSimAct.setStatusTip('Optimize Model')
+    optSimAct.triggered.connect(self.startoptmodel)
 
     menubar = self.menuBar()
     fileMenu = menubar.addMenu('&File')
@@ -2125,7 +2398,11 @@ class HNNGUI (QMainWindow):
     simMenu.addAction(setParmAct)
     simMenu.addAction(runSimAct)    
     if dconf['nsgrun']: simMenu.addAction(runSimNSGAct)
-    if dconf['optrun']: simMenu.addAction(optSimAct)
+    setOptParamAct = QAction('Configure Optimization', self)
+    setOptParamAct.setShortcut('Ctrl+O')
+    setOptParamAct.setStatusTip('Set parameters for evoked input optimization')
+    setOptParamAct.triggered.connect(self.showoptparamwin)
+    simMenu.addAction(setOptParamAct)
     prevSimAct = QAction('Go to Previous Simulation',self)
     prevSimAct.setShortcut('Ctrl+Z')
     prevSimAct.setStatusTip('Go Back to Previous Simulation')
@@ -2176,6 +2453,7 @@ class HNNGUI (QMainWindow):
     self.grid.addWidget(self.qbtn, gRow, 3, 1, 1)
     
   def shownetparamwin (self): bringwintotop(self.baseparamwin.netparamwin)
+  def showoptparamwin (self): bringwintotop(self.baseparamwin.optparamwin)
   def showdistparamwin (self): bringwintotop(self.erselectdistal)
   def showproxparamwin (self): bringwintotop(self.erselectprox)
   def showvisnet (self): Popen([getPyComm(), 'visnet.py', 'cells', paramf]) # nonblocking
@@ -2283,7 +2561,7 @@ class HNNGUI (QMainWindow):
     # need a separate widget to put grid on
     widget = QWidget(self)
     widget.setLayout(grid)
-    self.setCentralWidget(widget);
+    self.setCentralWidget(widget)
 
     self.c = Communicate()
     self.c.finishSim.connect(self.done)
@@ -2337,8 +2615,8 @@ class HNNGUI (QMainWindow):
     self.toolbar = NavigationToolbar(self.m, self)
     gCol = 0
     gWidth = 4
-    self.grid.addWidget(self.toolbar, gRow, gCol, 1, gWidth); 
-    self.grid.addWidget(self.m, gRow + 1, gCol, 1, gWidth); 
+    self.grid.addWidget(self.toolbar, gRow, gCol, 1, gWidth)
+    self.grid.addWidget(self.m, gRow + 1, gCol, 1, gWidth)
     if len(self.dextdata.keys()) > 0:
       import simdat
       simdat.ddat['dextdata'] = self.dextdata

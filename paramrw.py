@@ -772,6 +772,96 @@ def diffdict (d1, d2, verbose=True):
       if d1[k] != d2[k]:
         print('d1[',k,']=',d1[k],' d2[',k,']=',d2[k])
 
+def grow_chunks(input_chunks, tstart, tstop):
+    grown_chunks = []
+
+    for index, chunk in enumerate(input_chunks):
+        grown_chunks.append(chunk)
+        if index >= len(input_chunks) - 1:
+            grown_chunks[index]['end'] = tstop
+            grown_chunks[0]['start'] = tstart
+            break
+        grown_chunks[index]['end'] = input_chunks[index+1]['start']
+
+    return grown_chunks
+
+def consolidate_chunks(input_chunks):
+    # get a list of sorted chunks
+    sorted_chunks = sorted(input_chunks.items(), key=lambda x: x[1]['start'])
+
+    consolidated_chunks = []
+    for chunk in sorted_chunks:
+        # extract info from sorted list
+        chunk_dict = {'inputs': [chunk[0]],
+                      'start': chunk[1]['start'],
+                      'end': chunk[1]['end'],
+                      'type': chunk[1]['type'],
+                      'mean': chunk[1]['mean'],
+                      'sigma': chunk[1]['sigma'],
+                      }
+
+        if (len(consolidated_chunks) > 0) and \
+            (chunk_dict['start'] <= consolidated_chunks[-1]['end']):
+            # update previous chunk
+            consolidated_chunks[-1]['inputs'].extend(chunk_dict['inputs'])
+            consolidated_chunks[-1]['end'] = chunk_dict['end']
+            if not consolidated_chunks[-1]['type'] == chunk_dict['type']:
+              consolidated_chunks[-1]['type'] = 'mixed'
+            else:
+              consolidated_chunks[-1]['type'] = chunk_dict['type']
+        else:
+            # new chunk
+            consolidated_chunks.append(chunk_dict)
+
+    return consolidated_chunks
+
+def chunk_evinputs(params, sd_range):
+    import re
+    import scipy.stats as stats
+
+    input_info = {}
+
+    # first pass through all params to get mu and sigma for each
+    for k, v in params.items():
+        input_mu = re.match('^t_ev(prox|dist)_([0-9]+)', k)
+        if input_mu:
+            id_str = 'ev' + input_mu.group(1) + '_' + input_mu.group(2)
+            if not id_str in input_info:
+                input_info[id_str] = {}
+            input_info[id_str]['mean'] = float(v)
+            input_info[id_str]['type'] = input_mu.group(1)
+            continue
+        input_sigma = re.match('^sigma_t_ev(prox|dist)_([0-9]+)', k)
+        if input_sigma:
+            id_str = 'ev' + input_sigma.group(1) + '_' + input_sigma.group(2)
+            if not id_str in input_info:
+                input_info[id_str] = {}
+            input_info[id_str]['sigma'] = float(v)
+
+    # update with bounds (+/- sd_range * sigma)
+    for c in input_info.keys():
+        start = max(0, input_info[c]['mean'] - \
+                    sd_range * input_info[c]['sigma'])
+        end = min(float(params['tstop']), input_info[c]['mean'] + \
+                  sd_range * input_info[c]['sigma'])
+        input_info[c]['start'] = start
+        input_info[c]['end'] = end
+
+    # combined chunks that have overlapping ranges
+    consolidated_chunks = consolidate_chunks(input_info)
+
+    # prepare cdf for calculating weights
+    # num_step = int(float(params['tstop']) / float(params['dt'])) + 1
+    # times = np.linspace(0, float(params['tstop']), num_step)
+    # for index in range(len(consolidated_chunks)):
+    #     cdf = stats.norm.cdf(times, consolidated_chunks[index]['mean'],
+    #                          consolidated_chunks[index]['sigma'])
+    #     consolidated_chunks[index]['cdf'] = cdf
+
+    # make sure optimization covers entire simulation
+    return grow_chunks(consolidated_chunks, 0.0, float(params['tstop']))
+
+
 # debug test function
 if __name__ == '__main__':
   fparam = 'param/debug.param'
