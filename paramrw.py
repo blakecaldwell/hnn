@@ -772,95 +772,112 @@ def diffdict (d1, d2, verbose=True):
       if d1[k] != d2[k]:
         print('d1[',k,']=',d1[k],' d2[',k,']=',d2[k])
 
-def grow_chunks(input_chunks, tstart, tstop):
-    grown_chunks = []
-
-    for index, chunk in enumerate(input_chunks):
-        grown_chunks.append(chunk)
-        if index >= len(input_chunks) - 1:
-            grown_chunks[index]['end'] = tstop
-            grown_chunks[0]['start'] = tstart
-            break
-        grown_chunks[index]['end'] = input_chunks[index+1]['start']
-
-    return grown_chunks
-
-def consolidate_chunks(input_chunks):
+def consolidate_chunks(inputs):
     # get a list of sorted chunks
-    sorted_chunks = sorted(input_chunks.items(), key=lambda x: x[1]['start'])
+    sorted_inputs = sorted(inputs.items(), key=lambda x: x[1]['start'])
 
     consolidated_chunks = []
-    for chunk in sorted_chunks:
+    for one_input in sorted_inputs:
         # extract info from sorted list
-        chunk_dict = {'inputs': [chunk[0]],
-                      'start': chunk[1]['start'],
-                      'end': chunk[1]['end'],
-                      'type': chunk[1]['type'],
-                      'mean': chunk[1]['mean'],
-                      'sigma': chunk[1]['sigma'],
+        input_dict = {'inputs': [one_input[0]],
+                      'start': one_input[1]['start'],
+                      'end': one_input[1]['end'],
+                      'mean': one_input[1]['mean'],
+                      'sigma': one_input[1]['sigma'],
+                      'opt_start': one_input[1]['opt_start'],
+                      'opt_end': one_input[1]['opt_end'],
+                      'weights': one_input[1]['weights'],
                       }
 
         if (len(consolidated_chunks) > 0) and \
-            (chunk_dict['start'] <= consolidated_chunks[-1]['end']):
+            (input_dict['start'] <= consolidated_chunks[-1]['end']):
             # update previous chunk
-            consolidated_chunks[-1]['inputs'].extend(chunk_dict['inputs'])
-            consolidated_chunks[-1]['end'] = chunk_dict['end']
-            if not consolidated_chunks[-1]['type'] == chunk_dict['type']:
-              consolidated_chunks[-1]['type'] = 'mixed'
-            else:
-              consolidated_chunks[-1]['type'] = chunk_dict['type']
+            consolidated_chunks[-1]['inputs'].extend(input_dict['inputs'])
+            consolidated_chunks[-1]['end'] = input_dict['end']
+            consolidated_chunks[-1]['opt_end'] = max(consolidated_chunks[-1]['opt_end'], input_dict['opt_end'])
+            # average the weights
+            consolidated_chunks[-1]['weights'] = (consolidated_chunks[-1]['weights'] + one_input[1]['weights'])/2
         else:
             # new chunk
-            consolidated_chunks.append(chunk_dict)
+            consolidated_chunks.append(input_dict)
 
     return consolidated_chunks
 
-def chunk_evinputs(params, sd_range):
+def chunk_evinputs(opt_params, sim_tstop, sim_dt):
     import re
     import scipy.stats as stats
+    from math import ceil, floor
 
     input_info = {}
 
+    # first pass through opt_params to get mu and sigma for each
+    # TODO warn user if sigma selected for opt, but timing is not
+    for input_name in opt_params:
+        input_info[input_name] = {}
+        input_info[input_name]['mean'] = opt_params[input_name]['mean_time']
+        input_info[input_name]['start'] = opt_params[input_name]['start_time']
+        input_info[input_name]['end'] = opt_params[input_name]['end_time']
+        input_info[input_name]['sigma'] = opt_params[input_name]['sigma']
+
+
+    num_step = ceil(sim_tstop / sim_dt) + 1
+    times = np.linspace(0, sim_tstop, num_step)
+
+    for input_name in input_info.keys():
+        cdf = stats.norm.cdf(times, input_info[input_name]['mean'],
+                             input_info[input_name]['sigma'])
+        input_info[input_name]['cdf'] = cdf.copy()
+
+    for input_name in input_info.keys():
+        input_info[input_name]['weights'] = input_info[input_name]['cdf'].copy()
+
+        for other_input in input_info:
+            if input_name == other_input:
+                # don't subtract our own cdf(s)
+                continue
+            if input_info[other_input]['mean'] < \
+               input_info[input_name]['mean']:
+                # check ordering to only use inputs after us
+                continue
+            else:
+                decay_factor = 1.6*(input_info[other_input]['mean'] - \
+                                  input_info[input_name]['mean']) / \
+                                  sim_tstop
+                input_info[input_name]['weights'] -= input_info[other_input]['cdf'] * decay_factor
+
+        input_info[input_name]['weights'] = np.clip(input_info[input_name]['weights'], a_min=0, a_max=None)
+        input_info[input_name]['weights'] /= input_info[input_name]['weights'].mean()
+
+        # use the weight to define stop points for the optimization
+        # print("input name: %s"%input_name)
+        # print("input info: %s"%input_info[input_name])
+        # print("weights: %s"%input_info[input_name]['weights'])
+        # print("weight min: %s"%input_info[input_name]['weights'].min())
+        # print("weight max: %s"%input_info[input_name]['weights'].max())
+        input_info[input_name]['opt_start'] = min(input_info[input_name]['start'], times[np.where( input_info[input_name]['weights'] > 0.01)][0])
+        input_info[input_name]['opt_end'] = max(input_info[input_name]['end'], times[np.where( input_info[input_name]['weights'] > 0.01)][-1])
+
+        # convert to multiples of dt
+        input_info[input_name]['opt_start'] = floor(input_info[input_name]['opt_start']/sim_dt)*sim_dt
+        input_info[input_name]['opt_end'] = ceil(input_info[input_name]['opt_end']/sim_dt)*sim_dt
+
+    # combined chunks that have overlapping ranges
+    input_chunks = consolidate_chunks(input_info)
+
+    return input_chunks
+
+def get_inputs (params):
+    import re
+    input_list = []
+
     # first pass through all params to get mu and sigma for each
-    for k, v in params.items():
+    for k in params.keys():
         input_mu = re.match('^t_ev(prox|dist)_([0-9]+)', k)
         if input_mu:
             id_str = 'ev' + input_mu.group(1) + '_' + input_mu.group(2)
-            if not id_str in input_info:
-                input_info[id_str] = {}
-            input_info[id_str]['mean'] = float(v)
-            input_info[id_str]['type'] = input_mu.group(1)
-            continue
-        input_sigma = re.match('^sigma_t_ev(prox|dist)_([0-9]+)', k)
-        if input_sigma:
-            id_str = 'ev' + input_sigma.group(1) + '_' + input_sigma.group(2)
-            if not id_str in input_info:
-                input_info[id_str] = {}
-            input_info[id_str]['sigma'] = float(v)
+            input_list.append(id_str)
 
-    # update with bounds (+/- sd_range * sigma)
-    for c in input_info.keys():
-        start = max(0, input_info[c]['mean'] - \
-                    sd_range * input_info[c]['sigma'])
-        end = min(float(params['tstop']), input_info[c]['mean'] + \
-                  sd_range * input_info[c]['sigma'])
-        input_info[c]['start'] = start
-        input_info[c]['end'] = end
-
-    # combined chunks that have overlapping ranges
-    consolidated_chunks = consolidate_chunks(input_info)
-
-    # prepare cdf for calculating weights
-    # num_step = int(float(params['tstop']) / float(params['dt'])) + 1
-    # times = np.linspace(0, float(params['tstop']), num_step)
-    # for index in range(len(consolidated_chunks)):
-    #     cdf = stats.norm.cdf(times, consolidated_chunks[index]['mean'],
-    #                          consolidated_chunks[index]['sigma'])
-    #     consolidated_chunks[index]['cdf'] = cdf
-
-    # make sure optimization covers entire simulation
-    return grow_chunks(consolidated_chunks, 0.0, float(params['tstop']))
-
+    return input_list
 
 # debug test function
 if __name__ == '__main__':

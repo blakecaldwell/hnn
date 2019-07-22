@@ -109,27 +109,23 @@ def drawraster ():
 
 def calcerr (ddat):
   # calculates RMSE error from ddat dictionary
-  try:
-    NSig = errtot = 0.0; lerr = []
-    ddat['errtot']=None; ddat['lerr']=None
-    for fn,dat in ddat['dextdata'].items():
-      shp = dat.shape
-      # first downsample simulation timeseries to 600 Hz (assumes same time length as data)
-      dpldown = signal.resample(ddat['dpl'][:,1], len(dat[:,1]))
-      for c in range(1,shp[1],1):
-        err0 = rmse(dat[:,c], dpldown)
-        lerr.append(err0)
-        errtot += err0
-        print('RMSE: ',err0)
-        NSig += 1
-    errtot /= NSig
-    print('Avg. RMSE:' + str(round(errtot,2)))
-    ddat['errtot'] = errtot
-    ddat['lerr'] = lerr
-    return lerr, errtot
-  except:
-    #print('exception in calcerr')
-    return [],-1.0
+  NSig = errtot = 0.0; lerr = []
+  ddat['errtot']=None; ddat['lerr']=None
+  for fn,dat in ddat['dextdata'].items():
+    shp = dat.shape
+    # first downsample simulation timeseries to 600 Hz (assumes same time length as data)
+    dpldown = signal.resample(ddat['dpl'][:,1], len(dat[:,1]))
+    for c in range(1,shp[1],1):
+      err0 = rmse(dat[:,c], dpldown)
+      lerr.append(err0)
+      errtot += err0
+      print('RMSE: ',err0)
+      NSig += 1
+  errtot /= NSig
+  print('Avg. RMSE:' + str(round(errtot,2)))
+  ddat['errtot'] = errtot
+  ddat['lerr'] = lerr
+  return lerr, errtot
 
 class SIMCanvas (FigureCanvas):
   # matplotlib/pyqt-compatible canvas for drawing simulation & external data
