@@ -1302,13 +1302,14 @@ class OptEvokedInputParamDialog (EvokedInputParamDialog):
           tab.layout.itemAtPosition(row_index, 5).widget().setEnabled(False)
 
     # clean up the old grid layout
-    row_count = len(self.phase_qline)
+    row_count = self.sublayout.rowCount()
+    column_count = self.sublayout.columnCount()
     for row in range(1, row_count + 1):
-      self.sublayout.itemAtPosition(row_count - row, 0).widget().deleteLater()
-      self.sublayout.itemAtPosition(row_count - row, 1).widget().deleteLater()
-      self.sublayout.itemAtPosition(row_count - row, 2).widget().deleteLater()
-      self.sublayout.itemAtPosition(row_count - row, 3).widget().deleteLater()
-      self.sublayout.itemAtPosition(row_count - row, 4).widget().deleteLater()
+      for column in range(column_count-1):  # last column is a spacer item
+        try:
+         self.sublayout.itemAtPosition(row_count - row, column).widget().deleteLater()
+        except AttributeError:
+          pass
     self.phase_qline = []
     qlabel = []
 
