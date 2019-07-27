@@ -803,6 +803,20 @@ def consolidate_chunks(inputs):
 
     return consolidated_chunks
 
+def combine_chunks(input_chunks):
+    combined_chunk = {'inputs': [],
+                      'opt_start': 0.0,
+                      'opt_end': 0.0,
+    }
+
+    for evinput in input_chunks:
+        combined_chunk['inputs'].extend(evinput['inputs'])
+        if evinput['opt_end'] > combined_chunk['opt_end']:
+            combined_chunk['opt_end'] = evinput['opt_end']
+
+    combined_chunk['weights'] = np.ones(len(input_chunks[-1]['weights']))
+    return combined_chunk
+
 def chunk_evinputs(opt_params, sim_tstop, sim_dt):
     import re
     import scipy.stats as stats
@@ -846,7 +860,7 @@ def chunk_evinputs(opt_params, sim_tstop, sim_dt):
                 input_info[input_name]['weights'] -= input_info[other_input]['cdf'] * decay_factor
 
         input_info[input_name]['weights'] = np.clip(input_info[input_name]['weights'], a_min=0, a_max=None)
-        input_info[input_name]['weights'] /= input_info[input_name]['weights'].mean()
+        #input_info[input_name]['weights'] /= input_info[input_name]['weights'].mean()
 
         # use the weight to define stop points for the optimization
         # print("input name: %s"%input_name)
@@ -863,6 +877,10 @@ def chunk_evinputs(opt_params, sim_tstop, sim_dt):
 
     # combined chunks that have overlapping ranges
     input_chunks = consolidate_chunks(input_info)
+
+    # add one last chunk to the end
+    if len(input_chunks) > 1:
+        input_chunks.append(combine_chunks(input_chunks))
 
     return input_chunks
 

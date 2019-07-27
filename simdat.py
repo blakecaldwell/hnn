@@ -127,6 +127,55 @@ def calcerr (ddat):
   ddat['lerr'] = lerr
   return lerr, errtot
 
+def weighted_rmse(ddat, tstart, tstop):
+  from numpy import sqrt
+  from scipy import signal
+
+  # calculates RMSE error from ddat dictionary
+  NSig = errtot = 0.0; lerr = []
+  ddat['errtot']=None; ddat['lerr']=None
+  for fn,dat in ddat['dextdata'].items():
+    shp = dat.shape
+    exp_times = dat[:,0]
+    sim_times = ddat['dpl'][:,0]
+
+    # make sure start and end times are valid for both dipoles
+    exp_start_index = (np.abs(exp_times - tstart)).argmin()
+    exp_end_index = (np.abs(exp_times - tstop)).argmin()
+    exp_length = exp_end_index - exp_start_index
+
+    sim_start_index = (np.abs(sim_times - tstart)).argmin()
+    sim_end_index = (np.abs(sim_times - tstop)).argmin()
+    sim_length = sim_end_index - sim_start_index
+
+    weight = ddat['weights'][sim_start_index:sim_end_index]
+
+    for c in range(1,shp[1],1):
+      dpl1 = ddat['dpl'][sim_start_index:sim_end_index,1]
+      dpl2 = dat[exp_start_index:exp_end_index,c]
+
+      if (sim_length > exp_length):
+          # downsample simulation timeseries to match exp data
+          dpl1 = signal.resample(dpl1, exp_length)
+          weight = signal.resample(weight, exp_length)
+          indices = np.where(weight < 1e-4)
+          weight[indices] = 0
+      elif (sim_length < exp_length):
+          # downsample exp timeseries to match simulation data
+          dpl2 = signal.resample(dpl2, sim_length)
+
+      err0 = np.sqrt((weight * ((dpl1 - dpl2) ** 2)).sum()/weight.sum())
+      lerr.append(err0)
+      errtot += err0
+      print('RMSE: ',err0)
+      NSig += 1
+  errtot /= NSig
+  print('Avg. RMSE:' + str(round(errtot,2)))
+  ddat['errtot'] = errtot
+  ddat['lerr'] = lerr
+  return lerr, errtot
+
+
 class SIMCanvas (FigureCanvas):
   # matplotlib/pyqt-compatible canvas for drawing simulation & external data
   # based on https://pythonspot.com/en/pyqt5-matplotlib/
