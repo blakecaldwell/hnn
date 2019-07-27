@@ -21,7 +21,7 @@ RUN apt-get update && \
 # use pip for matplotlib to get latest version (2.x) since apt-get was using older
 # version (1.5) which does not have set_facecolor
 # make sure matplotlib version 2 is used -- is this strictly needed?
-RUN pip3 install PyOpenGL matplotlib && \
+RUN pip3 install PyOpenGL matplotlib nlopt && \
     pip3 install --upgrade PyOpenGL matplotlib
 
 # create the group hnn_group and user hnn_user
