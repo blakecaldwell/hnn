@@ -21,7 +21,7 @@ RUN apt-get update && \
 # use pip for matplotlib to get latest version (2.x) since apt-get was using older
 # version (1.5) which does not have set_facecolor
 # make sure matplotlib version 2 is used -- is this strictly needed?
-RUN pip3 install PyOpenGL matplotlib && \
+RUN pip3 install PyOpenGL matplotlib nlopt && \
     pip3 install --upgrade PyOpenGL matplotlib
 
 # create the group hnn_group and user hnn_user
@@ -70,7 +70,8 @@ ENV PATH=${PATH}:/home/hnn_user/nrn/build/$CPU/bin
 # setup HNN itself
 # HNN repo from github - moved to github on April 8, 2018
 RUN cd /home/hnn_user && \
-    git clone https://github.com/jonescompneurolab/hnn.git hnn_repo
+    git clone https://github.com/blakecaldwell/hnn.git hnn_repo && \
+    git checkout optimization
 # make compiles the mod files
 RUN cd /home/hnn_user/hnn_repo && \
     make
