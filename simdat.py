@@ -25,6 +25,9 @@ dfile = {} # data file information for current simulation
 lsimdat = [] # list of simulation data
 lsimidx = 0 # index into lsimdat
 
+initial_ddat = {}
+optdat = [] # list of optimization data
+
 def updatelsimdat(paramf,dpl):
   # update lsimdat with paramf and dipole dpl
   # but if the specific sim already run put dipole at that location in list
@@ -38,6 +41,12 @@ def updatelsimdat(paramf,dpl):
       break
   if not found: lsimdat.append([paramf,dpl]) # if not found, append to end of the list
   lsimidx = len(lsimdat) - 1 # current simulation index
+
+
+def updateoptdat(paramf,dpl):
+  global optdat
+
+  optdat.append([paramf,dpl])
 
 def rmse (a1, a2):
   # return root mean squared error between a1, a2; assumes same lengths, sampling rates
@@ -119,15 +128,16 @@ def calcerr (ddat):
       err0 = rmse(dat[:,c], dpldown)
       lerr.append(err0)
       errtot += err0
-      print('RMSE: ',err0)
+      #print('RMSE: ',err0)
       NSig += 1
-  errtot /= NSig
-  print('Avg. RMSE:' + str(round(errtot,2)))
+  if not NSig == 0.0:
+    errtot /= NSig
+  #print('Avg. RMSE:' + str(round(errtot,2)))
   ddat['errtot'] = errtot
   ddat['lerr'] = lerr
   return lerr, errtot
 
-def weighted_rmse(ddat, tstart, tstop):
+def weighted_rmse(ddat, tstart, tstop, weights):
   from numpy import sqrt
   from scipy import signal
 
@@ -148,7 +158,7 @@ def weighted_rmse(ddat, tstart, tstop):
     sim_end_index = (np.abs(sim_times - tstop)).argmin()
     sim_length = sim_end_index - sim_start_index
 
-    weight = ddat['weights'][sim_start_index:sim_end_index]
+    weight = weights[sim_start_index:sim_end_index]
 
     for c in range(1,shp[1],1):
       dpl1 = ddat['dpl'][sim_start_index:sim_end_index,1]
@@ -167,10 +177,10 @@ def weighted_rmse(ddat, tstart, tstop):
       err0 = np.sqrt((weight * ((dpl1 - dpl2) ** 2)).sum()/weight.sum())
       lerr.append(err0)
       errtot += err0
-      print('RMSE: ',err0)
+      #print('RMSE: ',err0)
       NSig += 1
   errtot /= NSig
-  print('Avg. RMSE:' + str(round(errtot,2)))
+  #print('Avg. RMSE:' + str(round(errtot,2)))
   ddat['errtot'] = errtot
   ddat['lerr'] = lerr
   return lerr, errtot
@@ -384,68 +394,81 @@ class SIMCanvas (FigureCanvas):
 
   def plotextdat (self, recalcErr=True):
     # plot 'external' data (e.g. from experiment/other simulation)
-    try:
-      #self.plotsimdat()
-      if recalcErr: calcerr(ddat) # recalculate/save the error?
+    #self.plotsimdat()
+    hassimdata = self.hassimdata() # has the simulation been run yet?
+    if hassimdata and recalcErr:
+      calcerr(ddat) # recalculate/save the error?
       lerr, errtot = ddat['lerr'], ddat['errtot']
+    else:
+      lerr = None
+      errtot = None
+    if self.hasoptdata():
+      initial_err = initial_ddat['errtot']
 
-      hassimdata = self.hassimdata() # has the simulation been run yet?
+    if not hasattr(self,'axdipole'): self.setupaxdipole() # do we need an axis for drawing?
+    elif self.axdipole is None: self.setupaxdipole()
 
-      if not hasattr(self,'axdipole'): self.setupaxdipole() # do we need an axis for drawing?
-      elif self.axdipole is None: self.setupaxdipole()
+    ax = self.axdipole
+    yl = ax.get_ylim()
 
-      ax = self.axdipole
-      yl = ax.get_ylim()
+    cmap=plt.get_cmap('nipy_spectral')
+    csm = plt.cm.ScalarMappable(cmap=cmap);
+    csm.set_clim((0,100))
 
-      cmap=plt.get_cmap('nipy_spectral')
-      csm = plt.cm.ScalarMappable(cmap=cmap);
-      csm.set_clim((0,100))
+    self.clearlextdatobj() # clear annotation objects
 
-      self.clearlextdatobj() # clear annotation objects
-
-      ddx = 0
-      for fn,dat in ddat['dextdata'].items():
-        shp = dat.shape
-        clr = csm.to_rgba(self.getnextcolor())
-        c = min(shp[1],1)
-        self.lextdatobj.append(ax.plot(dat[:,0],dat[:,c],color=clr,linewidth=self.gui.linewidth+1))
-        yl = ((min(yl[0],min(dat[:,c]))),(max(yl[1],max(dat[:,c]))))
-        fx = int(shp[0] * float(c) / shp[1])
-        if lerr:
-          tx,ty=dat[fx,0],dat[fx,c]
-          txt='RMSE:' + str(round(lerr[ddx],2))
+    ddx = 0
+    for fn,dat in ddat['dextdata'].items():
+      shp = dat.shape
+      clr = csm.to_rgba(self.getnextcolor())
+      c = min(shp[1],1)
+      self.lextdatobj.append(ax.plot(dat[:,0],dat[:,c],color=clr,linewidth=self.gui.linewidth+1))
+      yl = ((min(yl[0],min(dat[:,c]))),(max(yl[1],max(dat[:,c]))))
+      fx = int(shp[0] * float(c) / shp[1])
+      if lerr:
+        tx,ty=dat[fx,0],dat[fx,c]
+        txt='RMSE:' + str(round(lerr[ddx],2))
+        if not self.hasoptdata():      
           self.lextdatobj.append(ax.annotate(txt,xy=(dat[0,0],dat[0,c]),xytext=(tx,ty),color=clr,fontweight='bold'))
-        self.lpatch.append(mpatches.Patch(color=clr, label=fn.split(os.path.sep)[-1].split('.txt')[0]))
-        ddx+=1
+      self.lpatch.append(mpatches.Patch(color=clr, label=fn.split(os.path.sep)[-1].split('.txt')[0]))
+      ddx+=1
 
-      ax.set_ylim(yl)
+    ax.set_ylim(yl)
 
-      if self.lextdatobj and self.lpatch:
-        self.lextdatobj.append(ax.legend(handles=self.lpatch))
+    if self.lextdatobj and self.lpatch:
+      self.lextdatobj.append(ax.legend(handles=self.lpatch))
 
-      if errtot:
-        tx,ty=0,0
+    if errtot:
+      tx,ty=0,0
+      if self.hasoptdata():
+        clr = 'black'
+        txt='RMSE:' + str(round(initial_err,2))
+        self.annot_avg = ax.annotate(txt,xy=(0,0),xytext=(0.005,0.005),textcoords='axes fraction',color=clr,fontweight='bold')
+        clr = 'gray'
+        txt='RMSE:' + str(round(errtot,2))
+        self.annot_avg = ax.annotate(txt,xy=(0,0),xytext=(0.86,0.005),textcoords='axes fraction',color=clr,fontweight='bold')
+      else:
+        clr = 'black'
         txt='Avg. RMSE:' + str(round(errtot,2))
-        self.annot_avg = ax.annotate(txt,xy=(0,0),xytext=(0.005,0.005),textcoords='axes fraction',fontweight='bold')
+        self.annot_avg = ax.annotate(txt,xy=(0,0),xytext=(0.005,0.005),textcoords='axes fraction',color=clr,fontweight='bold')
 
-      if not hassimdata: # need axis labels
-        left = 0.08
-        w,h=getscreengeom()
-        if w < 2800: left = 0.1
-        ax.set_xlabel('Time (ms)',fontsize=dconf['fontsize'])
-        ax.set_ylabel('Dipole (nAm)',fontsize=dconf['fontsize'])
-        myxl = ax.get_xlim()
-        if myxl[0] < 0.0: ax.set_xlim((0.0,myxl[1]+myxl[0]))
-        self.figure.subplots_adjust(left=left,right=0.99,bottom=0.0,top=0.99,hspace=0.1,wspace=0.1) # reduce padding
-
-    except:
-      print('simdat ERR: could not plotextdat')
-      return False
-    return True
+    if not hassimdata: # need axis labels
+      left = 0.08
+      w,h=getscreengeom()
+      if w < 2800: left = 0.1
+      ax.set_xlabel('Time (ms)',fontsize=dconf['fontsize'])
+      ax.set_ylabel('Dipole (nAm)',fontsize=dconf['fontsize'])
+      myxl = ax.get_xlim()
+      if myxl[0] < 0.0: ax.set_xlim((0.0,myxl[1]+myxl[0]))
+      self.figure.subplots_adjust(left=left,right=0.99,bottom=0.0,top=0.99,hspace=0.1,wspace=0.1) # reduce padding
 
   def hassimdata (self):
     # check if any simulation data available in ddat dictionary
     return 'dpl' in ddat
+
+  def hasoptdata (self):
+    # check if any optimization data available in initial_ddat dictionary
+    return 'dpl' in initial_ddat
 
   def clearlextdatobj (self):
     # clear list of external data objects
@@ -459,7 +482,12 @@ class SIMCanvas (FigureCanvas):
       self.lextdatobj = [] # reset list of external data objects
       self.lpatch = [] # reset legend
       self.clridx = 5 # reset index for next color for drawing external data
-      if self.hassimdata(): self.lpatch.append(mpatches.Patch(color='black', label='Simulation'))
+
+      if self.hasoptdata():
+        self.lpatch.append(mpatches.Patch(color='grey', label='Optimization'))
+        self.lpatch.append(mpatches.Patch(color='black', label='Initial'))
+      elif self.hassimdata():
+        self.lpatch.append(mpatches.Patch(color='black', label='Simulation'))
       if hasattr(self,'annot_avg'):
         self.annot_avg.set_visible(False)
         del self.annot_avg
@@ -479,38 +507,40 @@ class SIMCanvas (FigureCanvas):
 
     # whether to draw the specgram - should draw if user saved it or have ongoing, poisson, or tonic inputs
     DrawSpec = find_param(dfile['outparam'],'save_spec_data') or dinty['Ongoing'] or dinty['Poisson'] or dinty['Tonic']
-    try:
-      ds = None
-      xl = (0,find_param(dfile['outparam'],'tstop'))
-      dt = find_param(dfile['outparam'],'dt')
 
-      # get spectrogram if it exists, then adjust axis limits but only if drawing spectrogram
-      if DrawSpec and 'spec' in ddat:
-        if ddat['spec'] is not None:
-          ds = ddat['spec'] # spectrogram
-          xl = (ds['time'][0],ds['time'][-1]) # use specgram time limits
+    ds = None
+    xl = (0,find_param(dfile['outparam'],'tstop'))
+    dt = find_param(dfile['outparam'],'dt')
 
-      gRow = 0
+    # get spectrogram if it exists, then adjust axis limits but only if drawing spectrogram
+    if DrawSpec and 'spec' in ddat:
+      if ddat['spec'] is not None:
+        ds = ddat['spec'] # spectrogram
+        xl = (ds['time'][0],ds['time'][-1]) # use specgram time limits
 
-      sampr = 1e3/dt # dipole sampling rate
-      sidx, eidx = int(sampr*xl[0]/1e3), int(sampr*xl[1]/1e3) # use these indices to find dipole min,max
+    gRow = 0
 
-      if dinty['Ongoing'] or dinty['Evoked'] or dinty['Poisson']:
-        xo = self.plotinputhist(xl, dinty)
-        if xo: gRow = xo[1]
+    sampr = 1e3/dt # dipole sampling rate
+    sidx, eidx = int(sampr*xl[0]/1e3), int(sampr*xl[1]/1e3) # use these indices to find dipole min,max
 
-      if DrawSpec: # dipole axis takes fewer rows if also drawing specgram
-        self.axdipole = ax = self.figure.add_subplot(self.G[gRow:5,0]); # dipole
-        self.lax.append(ax)
-      else:
-        self.axdipole = ax = self.figure.add_subplot(self.G[gRow:-1,0]); # dipole
-        self.lax.append(ax)
+    if dinty['Ongoing'] or dinty['Evoked'] or dinty['Poisson']:
+      xo = self.plotinputhist(xl, dinty)
+      if xo: gRow = xo[1]
 
-      N_trials = self.getNTrials()
-      if debug: print('simdat: N_trials:',N_trials)
+    if DrawSpec: # dipole axis takes fewer rows if also drawing specgram
+      self.axdipole = ax = self.figure.add_subplot(self.G[gRow:5,0]); # dipole
+      self.lax.append(ax)
+    else:
+      self.axdipole = ax = self.figure.add_subplot(self.G[gRow:-1,0]); # dipole
+      self.lax.append(ax)
 
-      yl = [np.amin(ddat['dpl'][sidx:eidx,1]),np.amax(ddat['dpl'][sidx:eidx,1])]
+    N_trials = self.getNTrials()
+    if debug: print('simdat: N_trials:',N_trials)
 
+    yl = [np.amin(ddat['dpl'][sidx:eidx,1]),np.amax(ddat['dpl'][sidx:eidx,1])]
+
+    if not self.hasoptdata():
+      # skip for optimization
       for lsim in lsimdat: # plot average dipoles from prior simulations
         olddpl = lsim[1]
         if debug: print('olddpl has shape ',olddpl.shape,len(olddpl[:,0]),len(olddpl[:,1]))
@@ -518,53 +548,61 @@ class SIMCanvas (FigureCanvas):
         yl[0] = min(yl[0],olddpl[sidx:eidx,1].min())
         yl[1] = max(yl[1],olddpl[sidx:eidx,1].max())
 
-      if N_trials>1 and dconf['drawindivdpl'] and len(ddat['dpltrials']) > 0: # plot dipoles from individual trials
-        for dpltrial in ddat['dpltrials']:
-          ax.plot(dpltrial[:,0],dpltrial[:,1],color='gray',linewidth=self.gui.linewidth)
-          yl[0] = min(yl[0],dpltrial[sidx:eidx,1].min())
-          yl[1] = max(yl[1],dpltrial[sidx:eidx,1].max())
+    if N_trials>1 and dconf['drawindivdpl'] and len(ddat['dpltrials']) > 0: # plot dipoles from individual trials
+      for dpltrial in ddat['dpltrials']:
+        ax.plot(dpltrial[:,0],dpltrial[:,1],color='gray',linewidth=self.gui.linewidth)
+        yl[0] = min(yl[0],dpltrial[sidx:eidx,1].min())
+        yl[1] = max(yl[1],dpltrial[sidx:eidx,1].max())
 
-      if dinty['Evoked']: self.drawEVInputTimes(ax,yl,0.1,(xl[1]-xl[0])*.02,(yl[1]-yl[0])*.02)#15.0)
-      #if dinty['Evoked']: self.drawEVInputTimes(ax,yl,0.1,15.0)
+    if dinty['Evoked']: self.drawEVInputTimes(ax,yl,0.1,(xl[1]-xl[0])*.02,(yl[1]-yl[0])*.02)#15.0)
+    #if dinty['Evoked']: self.drawEVInputTimes(ax,yl,0.1,15.0)
 
-      if conf.dconf['drawavgdpl'] or N_trials <= 1:
-        # this is the average dipole (across trials)
-        # it's also the ONLY dipole when running a single trial
-        ax.plot(ddat['dpl'][:,0],ddat['dpl'][:,1],'k',linewidth=self.gui.linewidth+1)
+    if self.hasoptdata():
+      ax.plot(initial_ddat['dpl'][:,0],initial_ddat['dpl'][:,1],'--',color='black',linewidth=self.gui.linewidth)
+      for idx, opt in enumerate(optdat):
+        optdpl = opt[1]
+        if idx == len(optdat) - 1:
+          # only show the last optimization
+          ax.plot(optdpl[:,0],optdpl[:,1],'k',color='gray',linewidth=self.gui.linewidth+1)
+          # yl[0] = min(yl[0],optdpl[sidx:eidx,1].min())
+          # yl[1] = max(yl[1],optdpl[sidx:eidx,1].max())
+    elif conf.dconf['drawavgdpl'] or N_trials <= 1:
+      # this is the average dipole (across trials)
+      # it's also the ONLY dipole when running a single trial
+      ax.plot(ddat['dpl'][:,0],ddat['dpl'][:,1],'k',linewidth=self.gui.linewidth+1)
 
-      scalefctr = getscalefctr(self.paramf)
-      NEstPyr = int(self.getNPyr() * scalefctr)
+    scalefctr = getscalefctr(self.paramf)
+    NEstPyr = int(self.getNPyr() * scalefctr)
 
-      if NEstPyr > 0:
-        ax.set_ylabel(r'Dipole (nAm $\times$ '+str(scalefctr)+')\nFrom Estimated '+str(NEstPyr)+' Cells',fontsize=dconf['fontsize'])
-      else:
-        ax.set_ylabel(r'Dipole (nAm $\times$ '+str(scalefctr)+')\n',fontsize=dconf['fontsize'])
-      ax.set_xlim(xl); ax.set_ylim(yl)
+    if NEstPyr > 0:
+      ax.set_ylabel(r'Dipole (nAm $\times$ '+str(scalefctr)+')\nFrom Estimated '+str(NEstPyr)+' Cells',fontsize=dconf['fontsize'])
+    else:
+      ax.set_ylabel(r'Dipole (nAm $\times$ '+str(scalefctr)+')\n',fontsize=dconf['fontsize'])
+    ax.set_xlim(xl); ax.set_ylim(yl)
 
-      bottom = 0.0
-      left = 0.08
-      w,h=getscreengeom()
-      if w < 2800: left = 0.1
+    bottom = 0.0
+    left = 0.08
+    w,h=getscreengeom()
+    if w < 2800: left = 0.1
 
-      if DrawSpec: #
-        if debug: print('ylim is : ', np.amin(ddat['dpl'][sidx:eidx,1]),np.amax(ddat['dpl'][sidx:eidx,1]))
-        gRow = 6
-        self.axspec = ax = self.figure.add_subplot(self.G[gRow:10,0]); # specgram
-        self.lax.append(ax)
-        cax = ax.imshow(ds['TFR'],extent=(ds['time'][0],ds['time'][-1],ds['freq'][-1],ds['freq'][0]),aspect='auto',origin='upper',cmap=plt.get_cmap('jet'))
-        ax.set_ylabel('Frequency (Hz)',fontsize=dconf['fontsize'])
-        ax.set_xlabel('Time (ms)',fontsize=dconf['fontsize'])
-        ax.set_xlim(xl)
-        ax.set_ylim(ds['freq'][-1],ds['freq'][0])
-        cbaxes = self.figure.add_axes([0.6, 0.49, 0.3, 0.005])
-        cb = plt.colorbar(cax, cax = cbaxes, orientation='horizontal') # horizontal to save space
-        for ax in self.lax:
-          if ax: ax.set_xlim(xl)
-        bottom = 0.08
-      else:
-        ax.set_xlabel('Time (ms)',fontsize=dconf['fontsize'])
-    except:
-      print('ERR: in plotsimdat')
+    if DrawSpec: #
+      if debug: print('ylim is : ', np.amin(ddat['dpl'][sidx:eidx,1]),np.amax(ddat['dpl'][sidx:eidx,1]))
+      gRow = 6
+      self.axspec = ax = self.figure.add_subplot(self.G[gRow:10,0]); # specgram
+      self.lax.append(ax)
+      cax = ax.imshow(ds['TFR'],extent=(ds['time'][0],ds['time'][-1],ds['freq'][-1],ds['freq'][0]),aspect='auto',origin='upper',cmap=plt.get_cmap('jet'))
+      ax.set_ylabel('Frequency (Hz)',fontsize=dconf['fontsize'])
+      ax.set_xlabel('Time (ms)',fontsize=dconf['fontsize'])
+      ax.set_xlim(xl)
+      ax.set_ylim(ds['freq'][-1],ds['freq'][0])
+      cbaxes = self.figure.add_axes([0.6, 0.49, 0.3, 0.005])
+      cb = plt.colorbar(cax, cax = cbaxes, orientation='horizontal') # horizontal to save space
+      for ax in self.lax:
+        if ax: ax.set_xlim(xl)
+      bottom = 0.08
+    else:
+      ax.set_xlabel('Time (ms)',fontsize=dconf['fontsize'])
+
     self.figure.subplots_adjust(left=left,right=0.99,bottom=bottom,top=0.99,hspace=0.1,wspace=0.1) # reduce padding
 
   def plot (self):

@@ -829,16 +829,23 @@ def chunk_evinputs(opt_params, sim_tstop, sim_dt):
     for input_name in opt_params:
         input_info[input_name] = {}
         input_info[input_name]['mean'] = opt_params[input_name]['mean_time']
+        # start and end are used to determine whether chunks should be combined
         input_info[input_name]['start'] = opt_params[input_name]['start_time']
         input_info[input_name]['end'] = opt_params[input_name]['end_time']
+        # input_info[input_name]['start'] = opt_params[input_name]['start_time'] - opt_params[input_name]['sigma']
+        # input_info[input_name]['end'] = opt_params[input_name]['end_time'] + opt_params[input_name]['sigma']
         input_info[input_name]['sigma'] = opt_params[input_name]['sigma']
+        if input_info[input_name]['sigma'] == 0.0:
+            # sigma of 0 will not produce a CDF
+            input_info[input_name]['sigma'] = 0.01
 
 
     num_step = ceil(sim_tstop / sim_dt) + 1
     times = np.linspace(0, sim_tstop, num_step)
 
     for input_name in input_info.keys():
-        cdf = stats.norm.cdf(times, input_info[input_name]['mean'],
+        # calculate cdf using start time (minival of optimization range)
+        cdf = stats.norm.cdf(times, input_info[input_name]['start'],
                              input_info[input_name]['sigma'])
         input_info[input_name]['cdf'] = cdf.copy()
 
@@ -860,7 +867,7 @@ def chunk_evinputs(opt_params, sim_tstop, sim_dt):
                 input_info[input_name]['weights'] -= input_info[other_input]['cdf'] * decay_factor
 
         input_info[input_name]['weights'] = np.clip(input_info[input_name]['weights'], a_min=0, a_max=None)
-        #input_info[input_name]['weights'] /= input_info[input_name]['weights'].mean()
+#        input_info[input_name]['weights'] /= input_info[input_name]['weights'].mean()
 
         # use the weight to define stop points for the optimization
         # print("input name: %s"%input_name)
