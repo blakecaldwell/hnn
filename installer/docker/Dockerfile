@@ -74,10 +74,11 @@ ENV PATH=${PATH}:/home/hnn_user/nrn/build/$CPU/bin
 # setup HNN itself
 # HNN repo from github - moved to github on April 8, 2018
 RUN cd /home/hnn_user && \
-    git clone https://github.com/jonescompneurolab/hnn.git hnn_repo
+    git clone https://github.com/blakecaldwell/hnn.git hnn_repo
 
 # make compiles the mod files
 RUN cd /home/hnn_user/hnn_repo && \
+    git checkout optimization_pr && \
     make
 
 # cleanup these folders
