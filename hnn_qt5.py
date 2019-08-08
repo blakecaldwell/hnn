@@ -310,7 +310,7 @@ class RunSimThread (QThread):
           return 1e9 # invalid param value -> large error
 
       # stop the sim early if possible
-      dtest['tstop'] = self.opt_params['opt_end']
+      dconf['tstop'] = dtest['tstop'] = self.opt_params['opt_end']
 
       self.updatebaseparamwin(dtest) # put new param values into GUI
       sleep(1)
@@ -318,14 +318,18 @@ class RunSimThread (QThread):
       self.runsim(is_opt=True) # run the simulation as usual and read its output
 
       if self.last_step:
-        lerr, err0 = simdat.calcerr(simdat.ddat)
+        lerr, err0 = simdat.calcerr(simdat.ddat,
+                                    self.opt_params['opt_end'],
+                                    tstart=self.opt_params['opt_start'])
         print("regular RMSE = %f"% (err0))
       else:
-        lerr, err1 = simdat.calcerr(simdat.ddat)
+        lerr, err1 = simdat.calcerr(simdat.ddat,
+                                    self.opt_params['opt_end'],
+                                    tstart=self.opt_params['opt_start'])
         lerr, err0 = simdat.weighted_rmse(simdat.ddat,
-                             self.opt_params['opt_start'],
                              self.opt_params['opt_end'],
-                             self.opt_params['weights'])
+                             self.opt_params['weights'],
+                             tstart=self.opt_params['opt_start'])
         print("weighted RMSE = %f, regular RMSE = %f"% (err0,err1))
       self.updatewaitsimwin(os.linesep+'Simulation finished: error='+str(simdat.ddat['errtot'])+os.linesep) # print error
       #print(os.linesep+'Simulation finished: error='+str(simdat.ddat['errtot'])+os.linesep)#,'time=',time())
@@ -2005,6 +2009,10 @@ class BaseParamDialog (QDialog):
   def updateDispParam (self):
     # now update the GUI components to reflect the param file selected
     din = quickreadprm(paramf)
+    if not 'tstop' in din:
+      print("WARNING: could not find a complete parameter file")
+      return
+
     if usingEvokedInputs(din): # default for evoked is to show average dipole
       conf.dconf['drawavgdpl'] = True        
     elif usingOngoingInputs(din): # default for ongoing is NOT to show average dipole      
@@ -2297,7 +2305,7 @@ class HNNGUI (QMainWindow):
       simdat.ddat['dextdata'] = self.dextdata
       print('Loaded data in ', fn)
     except:
-      print('Could not load data in ', fn)
+      print('WARNING: could not load data in ', fn)
       return False
     try:
       self.m.plotextdat()
@@ -2307,7 +2315,7 @@ class HNNGUI (QMainWindow):
         self.toggleEnableOptimization(True)
       return True
     except:
-      print('Could not plot data from ', fn)
+      print('WARNING: could not plot data from ', fn)
       return False
 
   def loadDataFileDialog (self):

@@ -116,16 +116,36 @@ def drawraster ():
       plt.plot([pair[0]],[pair[1]],'ko',markersize=10)
     plt.xlabel('Time (ms)',fontsize=dconf['fontsize']); plt.ylabel('ID',fontsize=dconf['fontsize'])
 
-def calcerr (ddat):
+def calcerr (ddat, tstop, tstart=0.0):
   # calculates RMSE error from ddat dictionary
   NSig = errtot = 0.0; lerr = []
   ddat['errtot']=None; ddat['lerr']=None
   for fn,dat in ddat['dextdata'].items():
     shp = dat.shape
-    # first downsample simulation timeseries to 600 Hz (assumes same time length as data)
-    dpldown = signal.resample(ddat['dpl'][:,1], len(dat[:,1]))
+
+    exp_times = dat[:,0]
+    sim_times = ddat['dpl'][:,0]
+
+    # make sure start and end times are valid for both dipoles
+    exp_start_index = (np.abs(exp_times - tstart)).argmin()
+    exp_end_index = (np.abs(exp_times - tstop)).argmin()
+    exp_length = exp_end_index - exp_start_index
+
+    sim_start_index = (np.abs(sim_times - tstart)).argmin()
+    sim_end_index = (np.abs(sim_times - tstop)).argmin()
+    sim_length = sim_end_index - sim_start_index
+
     for c in range(1,shp[1],1):
-      err0 = rmse(dat[:,c], dpldown)
+      dpl1 = ddat['dpl'][sim_start_index:sim_end_index,1]
+      dpl2 = dat[exp_start_index:exp_end_index,c]
+
+      if (sim_length > exp_length):
+          # downsample simulation timeseries to match exp data
+          dpl1 = signal.resample(dpl1, exp_length)
+      elif (sim_length < exp_length):
+          # downsample exp timeseries to match simulation data
+          dpl2 = signal.resample(dpl2, sim_length)
+      err0 = np.sqrt(((dpl1 - dpl2) ** 2).mean())
       lerr.append(err0)
       errtot += err0
       #print('RMSE: ',err0)
@@ -137,7 +157,7 @@ def calcerr (ddat):
   ddat['lerr'] = lerr
   return lerr, errtot
 
-def weighted_rmse(ddat, tstart, tstop, weights):
+def weighted_rmse(ddat, tstop, weights, tstart=0.0):
   from numpy import sqrt
   from scipy import signal
 
@@ -397,7 +417,7 @@ class SIMCanvas (FigureCanvas):
     #self.plotsimdat()
     hassimdata = self.hassimdata() # has the simulation been run yet?
     if hassimdata and recalcErr:
-      calcerr(ddat) # recalculate/save the error?
+      calcerr(ddat, dconf['tstop']) # recalculate/save the error?
       lerr, errtot = ddat['lerr'], ddat['errtot']
     else:
       lerr = None
