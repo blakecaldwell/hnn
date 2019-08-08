@@ -838,7 +838,7 @@ class EvokedInputParamDialog (QDialog):
   def setfromdin (self,din):
     if not din: return
 
-    if 'tstop' in din:
+    if 'dt' in din:
       # if we received a complete input file (not part of optimization)
       self.removeAllInputs() # turn off any previously set inputs
       nprox, ndist = countEvokedInputs(din)
