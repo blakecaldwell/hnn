@@ -310,7 +310,7 @@ class RunSimThread (QThread):
           return 1e9 # invalid param value -> large error
 
       # stop the sim early if possible
-      dconf['tstop'] = dtest['tstop'] = self.opt_params['opt_end']
+      dtest['tstop'] = self.opt_params['opt_end']
 
       self.updatebaseparamwin(dtest) # put new param values into GUI
       sleep(1)

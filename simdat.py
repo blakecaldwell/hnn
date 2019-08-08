@@ -417,7 +417,7 @@ class SIMCanvas (FigureCanvas):
     #self.plotsimdat()
     hassimdata = self.hassimdata() # has the simulation been run yet?
     if hassimdata and recalcErr:
-      calcerr(ddat, dconf['tstop']) # recalculate/save the error?
+      calcerr(ddat, find_param(dfile['outparam'],'tstop')) # recalculate/save the error?
       lerr, errtot = ddat['lerr'], ddat['errtot']
     else:
       lerr = None
@@ -578,14 +578,12 @@ class SIMCanvas (FigureCanvas):
     #if dinty['Evoked']: self.drawEVInputTimes(ax,yl,0.1,15.0)
 
     if self.hasoptdata():
-      ax.plot(initial_ddat['dpl'][:,0],initial_ddat['dpl'][:,1],'--',color='black',linewidth=self.gui.linewidth)
       for idx, opt in enumerate(optdat):
         optdpl = opt[1]
         if idx == len(optdat) - 1:
           # only show the last optimization
           ax.plot(optdpl[:,0],optdpl[:,1],'k',color='gray',linewidth=self.gui.linewidth+1)
-          # yl[0] = min(yl[0],optdpl[sidx:eidx,1].min())
-          # yl[1] = max(yl[1],optdpl[sidx:eidx,1].max())
+      ax.plot(initial_ddat['dpl'][:,0],initial_ddat['dpl'][:,1],'--',color='black',linewidth=self.gui.linewidth)
     elif conf.dconf['drawavgdpl'] or N_trials <= 1:
       # this is the average dipole (across trials)
       # it's also the ONLY dipole when running a single trial
