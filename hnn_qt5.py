@@ -249,12 +249,9 @@ class RunSimThread (QThread):
         self.updateoptparams()
         sleep(1)
         
-        # use the last step in case the number of steps changed by updateoptparams()
-        self.opt_params = dconf['opt_info'][-1]
-
-      # dconf['tstop'] = self.opt_params['opt_end']
-      # # write param file with new 'tstop'
-      # self.updatebaseparamwin(OrderedDict())
+        # reload opt_params for the last step in case the number of
+        # steps was changed by updateoptparams()
+        self.opt_params = dconf['opt_info'][len(dconf['opt_info']) - 1]
 
       print("Starting optimization step %d"%(step+1))
       self.runOptStep()
@@ -312,8 +309,8 @@ class RunSimThread (QThread):
                   self.opt_params['ranges'][param_name]['maxval'])
           return 1e9 # invalid param value -> large error
 
-      if debug:
-        print('set params:', new_params)
+      # stop the sim early if possible
+      dtest['tstop'] = self.opt_params['opt_end']
 
       self.updatebaseparamwin(dtest) # put new param values into GUI
       sleep(1)
@@ -1512,7 +1509,7 @@ class OptEvokedInputParamDialog (EvokedInputParamDialog):
     if not din:
       return
 
-    if 'tstop' in din:
+    if 'dt' in din:
       # din proivdes a complete parameter set
       self.din = din
       self.simlength = float(din['tstop'])
