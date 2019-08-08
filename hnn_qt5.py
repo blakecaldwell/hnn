@@ -318,19 +318,26 @@ class RunSimThread (QThread):
       self.runsim(is_opt=True) # run the simulation as usual and read its output
 
       if self.last_step:
-        lerr, err0 = simdat.calcerr(simdat.ddat,
-                                    self.opt_params['opt_end'],
-                                    tstart=self.opt_params['opt_start'])
-        print("regular RMSE = %f"% (err0))
+        simdat.weighted_rmse(simdat.ddat,
+                            self.opt_params['opt_end'],
+                            self.opt_params['weights'],
+                            tstart=self.opt_params['opt_start'])
+        simdat.calcerr(simdat.ddat,
+                      self.opt_params['opt_end'],
+                      tstart=self.opt_params['opt_start'])
+        err = simdat.ddat['werrtot']
+#        print("regular RMSE = %f"% (simdat.ddat['errtot']))
+        print("weighted RMSE = %f, regular RMSE = %f"% (simdat.ddat['werrtot'],simdat.ddat['errtot']))
       else:
-        lerr, err1 = simdat.calcerr(simdat.ddat,
-                                    self.opt_params['opt_end'],
-                                    tstart=self.opt_params['opt_start'])
-        lerr, err0 = simdat.weighted_rmse(simdat.ddat,
+        simdat.calcerr(simdat.ddat,
+                      self.opt_params['opt_end'],
+                      tstart=self.opt_params['opt_start'])
+        simdat.weighted_rmse(simdat.ddat,
                              self.opt_params['opt_end'],
                              self.opt_params['weights'],
                              tstart=self.opt_params['opt_start'])
-        print("weighted RMSE = %f, regular RMSE = %f"% (err0,err1))
+        err = simdat.ddat['werrtot']
+        print("weighted RMSE = %f, regular RMSE = %f"% (simdat.ddat['werrtot'],simdat.ddat['errtot']))
       self.updatewaitsimwin(os.linesep+'Simulation finished: error='+str(simdat.ddat['errtot'])+os.linesep) # print error
       #print(os.linesep+'Simulation finished: error='+str(simdat.ddat['errtot'])+os.linesep)#,'time=',time())
 
@@ -346,9 +353,9 @@ class RunSimThread (QThread):
       prmloc1 = os.path.join(outdir,'step_%d_iter_%d.param'%(self.cur_step,self.optiter))
       shutil.copyfile(prmloc0,prmloc1)
 
-      if simdat.ddat['errtot'] < self.stepminopterr:
-        print("new best with RMSE %f"%simdat.ddat['errtot'])
-        self.stepminopterr = simdat.ddat['errtot']
+      if err < self.stepminopterr:
+        print("new best with RMSE %f"%err)
+        self.stepminopterr = err
         # save best param file
         shutil.copyfile(prmloc0,os.path.join(outdir,'step_%d_best.param'%self.cur_step)) # convenience, save best here
         self.best_ddat = simdat.ddat.copy()
@@ -359,7 +366,7 @@ class RunSimThread (QThread):
 
       self.optiter += 1
 
-      return simdat.ddat['errtot'] # return error
+      return err # return error
 
     def optimize(params_input, evals, algorithm):
         num_params = len(params_input)

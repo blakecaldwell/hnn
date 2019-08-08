@@ -163,7 +163,7 @@ def weighted_rmse(ddat, tstop, weights, tstart=0.0):
 
   # calculates RMSE error from ddat dictionary
   NSig = errtot = 0.0; lerr = []
-  ddat['errtot']=None; ddat['lerr']=None
+  ddat['werrtot']=None; ddat['lerr']=None
   for fn,dat in ddat['dextdata'].items():
     shp = dat.shape
     exp_times = dat[:,0]
@@ -201,8 +201,8 @@ def weighted_rmse(ddat, tstop, weights, tstart=0.0):
       NSig += 1
   errtot /= NSig
   #print('Avg. RMSE:' + str(round(errtot,2)))
-  ddat['errtot'] = errtot
-  ddat['lerr'] = lerr
+  ddat['werrtot'] = errtot
+  ddat['wlerr'] = lerr
   return lerr, errtot
 
 
