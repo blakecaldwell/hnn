@@ -28,6 +28,8 @@ from paramrw import chunk_evinputs, get_inputs, trans_input, find_param
 from simdat import SIMCanvas, getinputfiles, readdpltrials
 from gutils import scalegeom, scalefont, setscalegeom, lowresdisplay, setscalegeomcenter, getmplDPI, getscreengeom
 import nlopt
+import psutil
+from threading import Lock
 
 prtime = False
 
@@ -79,7 +81,7 @@ class Communicate (QObject):
   updateRanges = pyqtSignal()
 
 class DoneSignal (QObject):
-  finishSim = pyqtSignal(bool)
+  finishSim = pyqtSignal(bool, bool)
 
 # for signaling - passing text
 class TextSignal (QObject):
@@ -96,6 +98,30 @@ def bringwintobot (win):
   #win.show()
   #win.lower()
   win.hide()
+
+def kill_list_of_procs(procs):
+  gone, alive = psutil.wait_procs(procs, timeout=3)
+  for p in alive:
+      p.kill()
+
+def get_nrniv_procs_running():
+  ls = []
+  name = 'nrniv'
+  for p in psutil.process_iter(attrs=["name", "exe", "cmdline"]):
+      if name == p.info['name'] or \
+              p.info['exe'] and os.path.basename(p.info['exe']) == name or \
+              p.info['cmdline'] and p.info['cmdline'][0] == name:
+          ls.append(p)
+  return ls
+
+def kill_and_check_nrniv_procs():
+    procs = get_nrniv_procs_running()
+    if len(procs) > 0:
+      kill_list_of_procs(procs)
+      procs = get_nrniv_procs_running()
+      if len(procs) > 0:
+        pids = [ proc.pid for proc in procs ]
+        print("ERROR: failed to kill nrniv process(es) %s"%pids.join(','))
 
 def bringwintotop (win):
   # bring a pyqt5 window to the top (parents still stay behind children)
@@ -137,6 +163,8 @@ class RunSimThread (QThread):
     if self.mainwin is not None:
       self.canvComm.csig.connect(self.mainwin.initSimCanvas)
 
+    self.lock = Lock()
+
   def updateoptparams (self):
     self.c.updateRanges.emit()
 
@@ -150,7 +178,8 @@ class RunSimThread (QThread):
   def updatedrawerr (self):
     self.canvComm.csig.emit(False, self.opt) # False means do not recalculate error
 
-  def stop (self): self.killed = True
+  def stop (self):
+    self.killproc()
 
   def __del__ (self):
     self.quit()
@@ -158,25 +187,49 @@ class RunSimThread (QThread):
 
   def run (self):
     if self.opt and self.baseparamwin is not None:
-      self.optmodel() # run optimization
-      self.d.finishSim.emit(True) # send the finish signal
+      try:
+        self.optmodel() # run optimization
+      except RuntimeError:
+        failed = True
     else:
-      self.runsim() # run simulation
-      self.d.finishSim.emit(False) # send the finish signal
+      try:
+        self.runsim() # run simulation
+      except RuntimeError:
+        failed = True
+      self.d.finishSim.emit(self.opt, failed) # send the finish signal
+
 
   def killproc (self):
-    if self.proc is None: return
+    if self.proc is None:
+      # any nrniv processes found are not part of current sim
+      return
+
     if debug: print('Thread killing sim. . .')
-    try:
-      self.proc.kill() # has to be called before proc ends
-      self.proc = None
-    except:
-      print('ERR: could not stop simulation process.')
+
+    # try the nice way to stop the mpiexec proc
+    self.proc.terminate()
+
+    retries = 0
+    while self.proc.poll() is None and retries < 5:
+      # mpiexec still running
+      self.proc.kill()
+      if self.proc.poll() is None:
+        sleep(1)
+      retries += 1
+
+    # make absolute sure all nrniv procs have been killed
+    kill_and_check_nrniv_procs()
+
+    self.lock.acquire()
+    self.killed = True
+    self.lock.release()
 
   # run sim command via mpi, then delete the temp file.
   def runsim (self, simlength=None, is_opt=False):
     import simdat
+    self.lock.acquire()
     self.killed = False
+    self.lock.release()
     if debug: print("Running simulation using",self.ncore,"cores.")
     if debug: print('self.onNSG:',self.onNSG)
     if self.onNSG:
@@ -191,45 +244,47 @@ class RunSimThread (QThread):
     if prtime:
       self.proc = Popen(cmdargs,cwd=os.getcwd())
     else: 
-      #self.proc = Popen(cmdargs,stdout=PIPE,stderr=PIPE,cwd=os.getcwd()) # may want to read/display stderr too
-      self.proc = Popen(cmdargs,stdout=PIPE,cwd=os.getcwd(),universal_newlines=True)
-    #cstart = time(); 
-    while not self.killed and self.proc.poll() is None: # job is not done
+      self.proc = Popen(cmdargs,stdout=PIPE,stderr=PIPE,cwd=os.getcwd(),universal_newlines=True)
+    #cstart = time();
+    while True:
+      status = self.proc.poll()
+      if not status is None:
+        if status == 0:
+          break
+        else:
+          print("Simulation exited with return code %d"%status)
+          kill_and_check_nrniv_procs()
+          raise RuntimeError
+
       for stdout_line in iter(self.proc.stdout.readline, ""):
         try: # see https://stackoverflow.com/questions/2104779/qobject-qplaintextedit-multithreading-issues
           self.updatewaitsimwin(stdout_line.strip()) # sends a pyqtsignal to waitsimwin, which updates its textedit
         except:
           if debug: print('RunSimThread updatewaitsimwin exception...')
           pass # catch exception in case anything else goes wrong
-        if self.killed:
-          self.killproc()
-          return
       self.proc.stdout.close()
+
+      for stderr_line in iter(self.proc.stderr.readline, ""):
+        try: # see https://stackoverflow.com/questions/2104779/qobject-qplaintextedit-multithreading-issues
+          self.updatewaitsimwin(stderr_line.strip()) # sends a pyqtsignal to waitsimwin, which updates its textedit
+        except:
+          if debug: print('RunSimThread updatewaitsimwin exception...')
+          pass # catch exception in case anything else goes wrong
+      self.proc.stderr.close()
+
+      # check if proc was killed
+      self.lock.acquire()
+      if self.killed:
+        self.lock.release()
+        # exit using RuntimeError
+        raise RuntimeError
+      else:
+        self.lock.release()
+
       sleep(1)
       # cend = time(); rtime = cend - cstart
     if debug: print('sim finished')
-    if not self.killed:  
-      if debug: print('not self.killed')
-      try: # lack of output file may occur if invalid param values lead to an nrniv crash
 
-        simdat.ddat['dpl'] = np.loadtxt(simdat.dfile['dpl'])
-        if debug: print('loaded new dpl file:', simdat.dfile['dpl'])#,'time=',time())
-        if os.path.isfile(simdat.dfile['spec']):
-          simdat.ddat['spec'] = np.load(simdat.dfile['spec'])
-        else:
-          simdat.ddat['spec'] = None
-        simdat.ddat['spk'] = np.loadtxt(simdat.dfile['spk'])
-        simdat.ddat['dpltrials'] = readdpltrials(os.path.join(dconf['datdir'],paramf.split(os.path.sep)[-1].split('.param')[0]),self.ntrial)
-        if debug: print("Read simulation outputs:",simdat.dfile.values())
-
-        if not is_opt:
-          simdat.updatelsimdat(paramf,simdat.ddat['dpl']) # update lsimdat and its current sim index
-
-      except: # no output to read yet
-        print('WARN: could not read simulation outputs:',simdat.dfile.values())
-    else:
-      if debug: print('self.killproc')
-      self.killproc()
     print(''); self.updatewaitsimwin('')
   
   def optmodel (self):
@@ -2999,7 +3054,10 @@ class HNNGUI (QMainWindow):
       self.stopsim() # stop sim works but leaves subproc as zombie until this main GUI thread exits
     else:
       self.optMode = True
-      self.optmodel(self.baseparamwin.runparamwin.getntrial(),self.baseparamwin.runparamwin.getncore())
+      try:
+        self.optmodel(self.baseparamwin.runparamwin.getntrial(),self.baseparamwin.runparamwin.getncore())
+      except RuntimeError:
+        print("Optimization aborted")
 
   def controlsim (self):
     # control the simulation
@@ -3079,7 +3137,7 @@ class HNNGUI (QMainWindow):
 
     bringwintotop(self.waitsimwin)
 
-  def done (self, optMode):
+  def done (self, optMode, failed):
     # called when the simulation completes running
     if debug: print('done')
     self.runningsim = False
@@ -3092,10 +3150,17 @@ class HNNGUI (QMainWindow):
     global basedir
     basedir = os.path.join(dconf['datdir'],paramf.split(os.path.sep)[-1].split('.param')[0])
     self.setcursors(Qt.ArrowCursor)
-    if optMode:
-      QMessageBox.information(self, "Done!", "Finished running optimization using " + paramf + '. Saved data/figures in: ' + basedir)
+    if failed:
+      msg = "Failed "
     else:
-      QMessageBox.information(self, "Done!", "Finished running sim using " + paramf + '. Saved data/figures in: ' + basedir)
+      msg = "Finished "
+
+    if optMode:
+      msg += "running optimization "
+    else:
+      msg += "running sim "
+
+    QMessageBox.information(self, "Done!", msg + "using " + paramf + '. Saved data/figures in: ' + basedir)
     self.setWindowTitle(paramf)
     self.populateSimCB() # populate the combobox
 
