@@ -190,6 +190,8 @@ class RunSimThread (QThread):
     self.wait()
 
   def run (self):
+    failed=False
+
     if self.opt and self.baseparamwin is not None:
       try:
         self.optmodel() # run optimization
@@ -197,6 +199,7 @@ class RunSimThread (QThread):
         failed = True
     else:
       try:
+        print("calling runsim with nobanner")
         self.runsim() # run simulation
       except RuntimeError:
         failed = True
@@ -222,8 +225,6 @@ class RunSimThread (QThread):
         sleep(1)
       retries += 1
 
-    print("killed mpiexe")
-
     # make absolute sure all nrniv procs have been killed
     kill_and_check_nrniv_procs()
 
@@ -238,8 +239,10 @@ class RunSimThread (QThread):
       mpicmd += '--use-hwthread-cpus '
 
     if banner:
+      print("spawn_sim with banner=True")
       nrniv_cmd = ' nrniv -python -mpi '
     else:
+      print("spawn_sim with banner=False")
       nrniv_cmd = ' nrniv -python -mpi -nobanner '
 
     if self.onNSG:
@@ -262,6 +265,8 @@ class RunSimThread (QThread):
     self.lock.acquire()
     self.killed = False
     self.lock.release()
+
+    print("runsim with banner=%d"%int(banner))
 
     self.spawn_sim(simlength, banner=banner, hwthreads=False)
     sleep(0.1)
@@ -379,6 +384,8 @@ class RunSimThread (QThread):
       self.first_step = False
 
     # one final sim with the best parameters to update display
+    print("calling runsim with banner=False")
+
     self.runsim(is_opt=True, banner=False)
     simdat.updatelsimdat(paramf,simdat.ddat['dpl']) # update lsimdat and its current sim index
 
@@ -425,7 +432,8 @@ class RunSimThread (QThread):
       self.updatebaseparamwin(dtest) # put new param values into GUI
       sleep(1)
 
-       # run the simulation, but stop early if possible
+      # run the simulation, but stop early if possible
+      print("calling runsim with banner=False")
       self.runsim(is_opt=True, banner=False, simlength=self.opt_params['opt_end'])
 
       # calculate wRMSE for all steps
