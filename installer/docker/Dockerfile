@@ -74,8 +74,9 @@ RUN sudo apt-get update && \
     sudo apt-get clean
 
 RUN cd /home/hnn_user && \
-    git clone https://github.com/jonescompneurolab/hnn.git hnn_repo && \
+    git clone https://github.com/blakecaldwell/hnn.git hnn_repo && \
     cd /home/hnn_user/hnn_repo && \
+    git checkout development && \
     make
 
 # if users open up a shell, they should go to the hnn repo checkout
