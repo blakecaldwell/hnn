@@ -9,11 +9,6 @@ RUN groupadd hnn_group && useradd -m -b /home/ -g hnn_group hnn_user && \
     adduser hnn_user sudo && \
     echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
-# copy the start script into the container
-COPY start_hnn.sh /home/hnn_user/
-RUN sudo chown hnn_user:hnn_group /home/hnn_user/start_hnn.sh && \
-    sudo chmod +x /home/hnn_user/start_hnn.sh
-
 USER hnn_user
 
 # allow user to specify architecture if different than x86_64
@@ -69,6 +64,11 @@ RUN sudo apt-get update && \
     sudo apt-get -y remove --purge bison flex python3-dev zlib1g-dev && \
     sudo apt-get autoremove -y --purge && \
     sudo apt-get clean
+
+# copy the start script into the container
+COPY start_hnn.sh /home/hnn_user/
+RUN sudo chown hnn_user:hnn_group /home/hnn_user/start_hnn.sh && \
+    sudo chmod +x /home/hnn_user/start_hnn.sh
 
 ARG CACHEBUST=1
 
