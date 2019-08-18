@@ -29,7 +29,10 @@ function retry_hnn {
   fi
 }
 
+export XDG_RUNTIME_DIR=/tmp/runtime-hnn_user
 export PYTHONPATH=/home/hnn_user/nrn/build/lib/python/
+export CPU=$(uname -m)
+export PATH=$PATH:/home/hnn_user/nrn/build/$CPU/bin
 
 # try once with current DISPLAY
 python3 hnn.py

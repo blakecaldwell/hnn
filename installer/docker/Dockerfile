@@ -44,10 +44,10 @@ RUN sudo chown -R hnn_user:hnn_group /home/hnn_user
 
 RUN sudo apt-get update && \
     sudo apt-get install -y git python3-dev python3-pip \
-                       zlib1g-dev libxaw7 libxmu6 libxpm4 \
-                       bison flex automake libtool libncurses-dev \
-                       libopenmpi-dev openmpi-bin libqt5core5a \
-                       libllvm6.0 libxkbcommon-x11-0 libfontconfig libx11-xcb1 libxrender1 \
+                       bison flex automake libtool libncurses-dev zlib1g-dev \
+                       libopenmpi-dev openmpi-bin libqt5core5a libllvm6.0 \
+                       libxaw7 libxmu6 libxpm4 libxcb-glx0 \
+                       libxkbcommon-x11-0 libfontconfig libx11-xcb1 libxrender1 \
                        git vim iputils-ping net-tools iproute2 nano sudo \
                        telnet language-pack-en-base \
                        && \
