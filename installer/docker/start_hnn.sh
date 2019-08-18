@@ -5,15 +5,10 @@ if [ ! -d /home/hnn_user/hnn ]; then
   mkdir /home/hnn_user/hnn
 fi
 
-cd /home/hnn_user/hnn_repo
+cd /home/hnn_user/hnn_source_code
 
 if [[ ! "$(ulimit -l)" =~ "unlimited" ]]; then
-  ulimit -l unlimited
-  if [[ "$?" -eq "0" ]]; then
-    echo "** Successfully increased max locked memory (for HNN) **"
-  else
-    echo "** Failed to increase max locked memory (for HNN) **"
-  fi
+  ulimit -l unlimited > /dev/null 2>&1
 fi
 
 function retry_hnn {

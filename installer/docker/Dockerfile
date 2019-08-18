@@ -73,10 +73,10 @@ RUN sudo apt-get update && \
 ARG CACHEBUST=1
 
 RUN cd /home/hnn_user && \
-    git clone https://github.com/blakecaldwell/hnn.git source_code && \
-    cd /home/hnn_user/source_code && \
+    git clone https://github.com/blakecaldwell/hnn.git hnn_source_code && \
+    cd /home/hnn_user/hnn_source_code && \
     git checkout development && \
     make
 
 # if users open up a shell, they should go to the hnn repo checkout
-WORKDIR /home/hnn_user/source_code
+WORKDIR /home/hnn_user/hnn_source_code
