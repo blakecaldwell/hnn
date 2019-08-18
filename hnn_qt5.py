@@ -77,6 +77,7 @@ else: plt.rcParams['font.size'] = dconf['fontsize'] = 10
 if debug: print('getPyComm:',getPyComm())
 
 hnn_root_dir = os.path.dirname(os.path.realpath(__file__))
+print("hnn real path: %s"%os.path.realpath(__file__))
 
 # for signaling
 class Communicate (QObject):
@@ -117,13 +118,19 @@ def get_nrniv_procs_running():
   return ls
 
 def kill_and_check_nrniv_procs():
+  print('in kill_and_check_nrniv_procs')
+  procs = get_nrniv_procs_running()
+  if len(procs) > 0:
+    print('there are nrniv procs running')
+
+    kill_list_of_procs(procs)
     procs = get_nrniv_procs_running()
     if len(procs) > 0:
-      kill_list_of_procs(procs)
-      procs = get_nrniv_procs_running()
-      if len(procs) > 0:
-        pids = [ proc.pid for proc in procs ]
-        print("ERROR: failed to kill nrniv process(es) %s"%pids.join(','))
+      pids = [ proc.pid for proc in procs ]
+      print("ERROR: failed to kill nrniv process(es) %s"%pids.join(','))
+  else:
+    print('No nrniv procs running')
+
 
 def bringwintotop (win):
   # bring a pyqt5 window to the top (parents still stay behind children)
@@ -218,6 +225,8 @@ class RunSimThread (QThread):
       if self.proc.poll() is None:
         sleep(1)
       retries += 1
+
+    print("killed mpiexe")
 
     # make absolute sure all nrniv procs have been killed
     kill_and_check_nrniv_procs()
