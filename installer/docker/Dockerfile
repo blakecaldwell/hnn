@@ -39,7 +39,9 @@ RUN mkdir /home/hnn_user/hnn
 
 CMD /home/hnn_user/start_hnn.sh
 
-# - These packages are needed for X display libxaw7 libxmu6 libxpm4
+# Note: something happens to /home/hnn_user/ ownership
+RUN sudo chown -R hnn_user:hnn_group /home/hnn_user
+
 RUN sudo apt-get update && \
     sudo apt-get install -y git python3-dev python3-pip \
                        zlib1g-dev libxaw7 libxmu6 libxpm4 \
@@ -51,7 +53,7 @@ RUN sudo apt-get update && \
                        && \
     sudo pip3 install pip --upgrade && \
     sudo pip install PyOpenGL matplotlib pyqt5 pyqtgraph scipy numpy nlopt && \
-    rm -rf /home/hnn_user/.cache && \
+    sudo rm -rf /home/hnn_user/.cache && \
     cd /home/hnn_user/ && \
     mkdir nrn && \
     cd nrn && \
