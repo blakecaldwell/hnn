@@ -73,6 +73,8 @@ RUN sudo apt-get update && \
     sudo apt-get autoremove -y --purge && \
     sudo apt-get clean
 
+ARG CACHEBUST=1
+
 RUN cd /home/hnn_user && \
     git clone https://github.com/blakecaldwell/hnn.git hnn_repo && \
     cd /home/hnn_user/hnn_repo && \
