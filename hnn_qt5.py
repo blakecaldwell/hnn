@@ -199,7 +199,7 @@ class RunSimThread (QThread):
         failed = True
     else:
       try:
-        self.runsim(is_opt=False, banner=True) # run simulation
+        self.runsim() # run simulation
       except RuntimeError:
         failed = True
 
@@ -259,7 +259,7 @@ class RunSimThread (QThread):
       self.proc = Popen(cmdargs,stdout=PIPE,stderr=PIPE,cwd=os.getcwd(),universal_newlines=True)
 
   # run sim command via mpi, then delete the temp file.
-  def runsim (self, simlength=None, is_opt=False, banner=True):
+  def runsim (self, is_opt=False, banner=True, simlength=None):
     import simdat
     self.lock.acquire()
     self.killed = False
@@ -426,7 +426,7 @@ class RunSimThread (QThread):
       sleep(1)
 
        # run the simulation, but stop early if possible
-      self.runsim(simlength=self.opt_params['opt_end'], is_opt=True, banner=False)
+      self.runsim(is_opt=True, banner=False, simlength=self.opt_params['opt_end'])
 
       # calculate wRMSE for all steps
       simdat.weighted_rmse(simdat.ddat,
