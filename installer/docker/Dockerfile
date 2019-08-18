@@ -30,21 +30,18 @@ RUN echo '# these lines define global session variables for HNN' >> ~/.bashrc &&
     echo 'export OMPI_MCA_btl_openib_allow_ib=1' >> ~/.bashrc && \
     echo 'export XDG_RUNTIME_DIR=/tmp/runtime-hnn_user' >> ~/.bashrc
 
-# run sudo to get rid of message on first login about using sudo
-RUN sudo -l
+RUN mkdir /tmp/runtime-hnn_user
 
-# create the hnn shared folder (don't rely on docker daemon
-# to create it)
-RUN mkdir /home/hnn_user/hnn
+# run sudo to get rid of message on first login about using sudo
+# Note: something happens to /home/hnn_user/ ownership
+RUN sudo -l && \
+    sudo chown -R hnn_user:hnn_group /home/hnn_user
 
 CMD /home/hnn_user/start_hnn.sh
 
-# Note: something happens to /home/hnn_user/ ownership
-RUN sudo chown -R hnn_user:hnn_group /home/hnn_user
-
 # compile NEURON, only temporarily installing packages for building
 RUN sudo apt-get update && \
-    sudo apt-get install -y git python3-dev python3-pip \
+    sudo apt-get install -y git python3-dev python3-pip python3-psutil \
                        bison flex automake libtool libncurses-dev zlib1g-dev \
                        libopenmpi-dev openmpi-bin libqt5core5a libllvm6.0 \
                        libxaw7 libxmu6 libxpm4 libxcb-glx0 \
@@ -76,10 +73,10 @@ RUN sudo apt-get update && \
 ARG CACHEBUST=1
 
 RUN cd /home/hnn_user && \
-    git clone https://github.com/blakecaldwell/hnn.git hnn_repo && \
-    cd /home/hnn_user/hnn_repo && \
+    git clone https://github.com/blakecaldwell/hnn.git source_code && \
+    cd /home/hnn_user/source_code && \
     git checkout development && \
     make
 
 # if users open up a shell, they should go to the hnn repo checkout
-WORKDIR /home/hnn_user/hnn_repo
+WORKDIR /home/hnn_user/source_code
