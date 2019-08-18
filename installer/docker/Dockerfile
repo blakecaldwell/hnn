@@ -69,8 +69,9 @@ RUN sudo chown hnn_user:hnn_group /home/hnn_user/start_hnn.sh && \
 ARG CACHEBUST=1
 
 RUN cd /home/hnn_user && \
-    git clone https://github.com/jonescompneurolab/hnn.git hnn_source_code && \
+    git clone https://github.com/blakecaldwell/hnn.git hnn_source_code && \
     cd hnn_source_code && \
+    git checkout development && \
     make
 
 # if users open up a shell, they should go to the hnn repo checkout
