@@ -193,7 +193,7 @@ class RunSimThread (QThread):
         failed = True
     else:
       try:
-        self.runsim() # run simulation
+        self.runsim(is_opt=False, banner=True) # run simulation
       except RuntimeError:
         failed = True
       self.d.finishSim.emit(self.opt, failed) # send the finish signal
@@ -224,20 +224,23 @@ class RunSimThread (QThread):
     self.killed = True
     self.lock.release()
 
-  # run sim command via mpi, then delete the temp file.
-  def runsim (self, simlength=None, is_opt=False):
+  def spawn_sim (self, simlength, banner=False, hwthreads=False):
     import simdat
-    self.lock.acquire()
-    self.killed = False
-    self.lock.release()
-    if debug: print("Running simulation using",self.ncore,"cores.")
-    if debug: print('self.onNSG:',self.onNSG)
+    mpicmd = 'mpiexec -np '
+    if hwthreads:
+      mpicmd += '--use-hwthread-cpus '
+
+    if banner:
+      nrniv_cmd = ' nrniv -python -mpi '
+    else:
+      nrniv_cmd = ' nrniv -python -mpi -nobanner '
+
     if self.onNSG:
       cmd = 'python nsgr.py ' + paramf + ' ' + str(self.ntrial) + ' 710.0'
     elif not simlength is None:
-      cmd = 'mpiexec -np ' + str(self.ncore) + ' nrniv -python -mpi -nobanner ' + simf + ' ' + paramf + ' ntrial ' + str(self.ntrial) + ' simlength ' + str(simlength)
+      cmd = mpicmd + str(self.ncore) + nrniv_cmd + simf + ' ' + paramf + ' ntrial ' + str(self.ntrial) + ' simlength ' + str(simlength)
     else:
-      cmd = 'mpiexec -np ' + str(self.ncore) + ' nrniv -python -mpi -nobanner ' + simf + ' ' + paramf + ' ntrial ' + str(self.ntrial)
+      cmd = mpicmd + str(self.ncore) + nrniv_cmd + simf + ' ' + paramf + ' ntrial ' + str(self.ntrial)
     simdat.dfile = getinputfiles(paramf)
     cmdargs = shlex.split(cmd,posix="win" not in sys.platform) # https://github.com/maebert/jrnl/issues/348
     if debug: print("cmd:",cmd,"cmdargs:",cmdargs)
@@ -245,6 +248,20 @@ class RunSimThread (QThread):
       self.proc = Popen(cmdargs,cwd=os.getcwd())
     else: 
       self.proc = Popen(cmdargs,stdout=PIPE,stderr=PIPE,cwd=os.getcwd(),universal_newlines=True)
+
+  # run sim command via mpi, then delete the temp file.
+  def runsim (self, simlength=None, is_opt=False, banner=True):
+    import simdat
+    self.lock.acquire()
+    self.killed = False
+    self.lock.release()
+
+    self.spawn_sim(simlength, banner=banner, hwthreads=False)
+    sleep(0.1)
+    if not self.proc.poll() is None:
+      # failed to start. try enabling running on hwthreads
+      self.spawn_sim(simlength, banner=banner, hwthreads=False)
+
     #cstart = time();
     while True:
       status = self.proc.poll()
@@ -353,7 +370,7 @@ class RunSimThread (QThread):
       self.first_step = False
 
     # one final sim with the best parameters to update display
-    self.runsim(is_opt=True)
+    self.runsim(is_opt=True, banner=False)
     simdat.updatelsimdat(paramf,simdat.ddat['dpl']) # update lsimdat and its current sim index
 
   def runOptStep (self):
@@ -400,7 +417,7 @@ class RunSimThread (QThread):
       sleep(1)
 
        # run the simulation, but stop early if possible
-      self.runsim(simlength=self.opt_params['opt_end'], is_opt=True)
+      self.runsim(simlength=self.opt_params['opt_end'], is_opt=True, banner=False)
 
       # calculate wRMSE for all steps
       simdat.weighted_rmse(simdat.ddat,
