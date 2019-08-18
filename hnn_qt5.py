@@ -126,8 +126,6 @@ def kill_and_check_nrniv_procs():
     if len(procs) > 0:
       pids = [ proc.pid for proc in procs ]
       print("ERROR: failed to kill nrniv process(es) %s"%pids.join(','))
-  else:
-
 
 def bringwintotop (win):
   # bring a pyqt5 window to the top (parents still stay behind children)
@@ -290,18 +288,20 @@ class RunSimThread (QThread):
           pass # catch exception in case anything else goes wrong
       self.proc.stdout.close()
 
-      for stderr_line in iter(self.proc.stderr.readline, ""):
-        try: # see https://stackoverflow.com/questions/2104779/qobject-qplaintextedit-multithreading-issues
-          self.updatewaitsimwin(stderr_line.strip()) # sends a pyqtsignal to waitsimwin, which updates its textedit
-        except:
-          if debug: print('RunSimThread updatewaitsimwin exception...')
-          pass # catch exception in case anything else goes wrong
-      self.proc.stderr.close()
-
       # check if proc was killed
       self.lock.acquire()
       if self.killed:
         self.lock.release()
+
+        # get stderr for debugging
+        for stderr_line in iter(self.proc.stderr.readline, ""):
+          try: # see https://stackoverflow.com/questions/2104779/qobject-qplaintextedit-multithreading-issues
+            self.updatewaitsimwin(stderr_line.strip()) # sends a pyqtsignal to waitsimwin, which updates its textedit
+          except:
+            if debug: print('RunSimThread updatewaitsimwin exception...')
+            pass # catch exception in case anything else goes wrong
+        self.proc.stderr.close()
+
         # exit using RuntimeError
         raise RuntimeError
       else:
