@@ -42,6 +42,7 @@ CMD /home/hnn_user/start_hnn.sh
 # Note: something happens to /home/hnn_user/ ownership
 RUN sudo chown -R hnn_user:hnn_group /home/hnn_user
 
+# compile NEURON, only temporarily installing packages for building
 RUN sudo apt-get update && \
     sudo apt-get install -y git python3-dev python3-pip \
                        bison flex automake libtool libncurses-dev zlib1g-dev \
@@ -49,8 +50,7 @@ RUN sudo apt-get update && \
                        libxaw7 libxmu6 libxpm4 libxcb-glx0 \
                        libxkbcommon-x11-0 libfontconfig libx11-xcb1 libxrender1 \
                        git vim iputils-ping net-tools iproute2 nano sudo \
-                       telnet language-pack-en-base \
-                       && \
+                       telnet language-pack-en-base && \
     sudo pip3 install pip --upgrade && \
     sudo pip install PyOpenGL matplotlib pyqt5 pyqtgraph scipy numpy nlopt && \
     sudo rm -rf /home/hnn_user/.cache && \
@@ -69,13 +69,14 @@ RUN sudo apt-get update && \
     python3 setup.py install --user && \
     cd /home/hnn_user/nrn/ && \
     rm -rf src && \
-    cd /home/hnn_user && \
+    sudo apt-get -y remove --purge bison flex python3-dev zlib1g-dev && \
+    sudo apt-get autoremove -y --purge && \
+    sudo apt-get clean
+
+RUN cd /home/hnn_user && \
     git clone https://github.com/jonescompneurolab/hnn.git hnn_repo && \
     cd /home/hnn_user/hnn_repo && \
-    make && \
-    sudo apt-get -y remove --purge bison flex automake libtool python3-dev zlib1g-dev libncurses-dev libopenmpi-dev && \
-    sudo apt autoremove -y --purge && \
-    sudo apt clean
+    make
 
 # if users open up a shell, they should go to the hnn repo checkout
 WORKDIR /home/hnn_user/hnn_repo
