@@ -46,7 +46,7 @@ RUN sudo apt-get update && \
     sudo apt-get install -y git python3-dev python3-pip \
                        zlib1g-dev libxaw7 libxmu6 libxpm4 \
                        bison flex automake libtool libncurses-dev \
-                       libopenmpi-dev libqt5core5a \
+                       libopenmpi-dev openmpi-bin libqt5core5a \
                        libllvm6.0 libxkbcommon-x11-0 libfontconfig libx11-xcb1 libxrender1 \
                        git vim iputils-ping net-tools iproute2 nano sudo \
                        telnet language-pack-en-base \
@@ -73,7 +73,7 @@ RUN sudo apt-get update && \
     git clone https://github.com/jonescompneurolab/hnn.git hnn_repo && \
     cd /home/hnn_user/hnn_repo && \
     make && \
-    sudo apt-get -y remove --purge bison flex automake libtool python3-dev zlib1g-dev libncurses-dev && \
+    sudo apt-get -y remove --purge bison flex automake libtool python3-dev zlib1g-dev libncurses-dev libopenmpi-dev && \
     sudo apt autoremove -y --purge && \
     sudo apt clean
 
