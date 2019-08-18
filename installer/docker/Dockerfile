@@ -50,7 +50,7 @@ RUN sudo apt-get update && \
                        telnet language-pack-en-base \
                        && \
     sudo pip3 install pip --upgrade && \
-    pip install PyOpenGL matplotlib pyqt5 pyqtgraph scipy numpy nlopt --user && \
+    sudo pip install PyOpenGL matplotlib pyqt5 pyqtgraph scipy numpy nlopt && \
     rm -rf /home/hnn_user/.cache && \
     cd /home/hnn_user/ && \
     mkdir nrn && \
