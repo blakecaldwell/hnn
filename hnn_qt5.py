@@ -254,10 +254,11 @@ class RunSimThread (QThread):
     if self.onNSG:
       cmd = 'python nsgr.py ' + paramf + ' ' + str(self.ntrial) + ' 710.0'
     elif not simlength is None:
-      cmd = mpicmd + str(self.ncore) + nrniv_cmd + simf + ' ' + paramf + ' ntrial ' + str(self.ntrial) + ' simlength ' + str(simlength)
+      cmd = mpicmd + str(self.ncore) + nrniv_cmd + simf + ' ' + paramf
     else:
-      cmd = mpicmd + str(self.ncore) + nrniv_cmd + simf + ' ' + paramf + ' ntrial ' + str(self.ntrial)
+      cmd = mpicmd + str(self.ncore) + nrniv_cmd + simf + ' ' + paramf
     simdat.dfile = getinputfiles(paramf)
+    print(cmd)
     cmdargs = shlex.split(cmd,posix="win" not in sys.platform) # https://github.com/maebert/jrnl/issues/348
     if debug: print("cmd:",cmd,"cmdargs:",cmdargs)
     if prtime:
@@ -331,19 +332,26 @@ class RunSimThread (QThread):
     try:
       # load data from sucessful sim
       simdat.ddat['dpl'] = np.loadtxt(simdat.dfile['dpl'])
-      if debug: print('loaded new dpl file:', simdat.dfile['dpl'])#,'time=',time())
-      if os.path.isfile(simdat.dfile['spec']):
-        simdat.ddat['spec'] = np.load(simdat.dfile['spec'])
-      else:
-        simdat.ddat['spec'] = None
-      simdat.ddat['spk'] = np.loadtxt(simdat.dfile['spk'])
-      simdat.ddat['dpltrials'] = readdpltrials(os.path.join(dconf['datdir'],paramf.split(os.path.sep)[-1].split('.param')[0]),self.ntrial)
-      if debug: print("Read simulation outputs:",simdat.dfile.values())
-
       if not is_opt:
         simdat.updatelsimdat(paramf,simdat.ddat['dpl']) # update lsimdat and its current sim index
     except OSError:
-      print('WARN: could not read simulation outputs:',simdat.dfile.values())
+      print('WARN: could not read simulation output: %s' % simdat.dfile['dpl'])
+    if os.path.isfile(simdat.dfile['spec']):
+      try:
+        simdat.ddat['spec'] = np.load(simdat.dfile['spec'])
+      except OSError:
+        print('WARN: could not read simulation output: %s' % simdat.dfile['spec'])
+    else:
+      simdat.ddat['spec'] = None
+
+    try:
+      simdat.ddat['spk'] = np.loadtxt(simdat.dfile['spk'])
+    except OSError:
+      print('WARN: could not read simulation output: %s' % simdat.dfile['spk'])
+    try:
+      simdat.ddat['dpltrials'] = readdpltrials(os.path.join(dconf['datdir'],paramf.split(os.path.sep)[-1].split('.param')[0]),self.ntrial)
+    except OSError:
+      print('WARN: could not read dpl trials')
 
   def optmodel (self):
     import simdat

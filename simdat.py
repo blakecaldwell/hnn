@@ -6,11 +6,12 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.gridspec as gridspec
 import numpy as np
+import warnings
 from math import ceil
 from conf import dconf
 import conf
 import spikefn
-from paramrw import usingOngoingInputs, usingEvokedInputs, usingPoissonInputs, usingTonicInputs, find_param, quickgetprm, countEvokedInputs
+from newparamrw import usingOngoingInputs, usingEvokedInputs, usingPoissonInputs, usingTonicInputs, quickgetprm, countEvokedInputs, quickreadprm
 from scipy import signal
 from gutils import getscreengeom
 
@@ -262,7 +263,7 @@ class SIMCanvas (FigureCanvas):
     plot_distribs = False
 
     try:
-      extinputs = spikefn.ExtInputs(dfile['spk'], dfile['outparam'])
+      extinputs = spikefn.ExtInputs(dfile['outparam'], dfile['spk'])
       extinputs.add_delay_times()
       dinput = extinputs.inputs
     except FileNotFoundError:
@@ -272,7 +273,7 @@ class SIMCanvas (FigureCanvas):
     if len(dinput['dist']) <= 0 and len(dinput['prox']) <= 0 and \
         len(dinput['evdist']) <= 0 and len(dinput['evprox']) <= 0 and \
         len(dinput['pois']) <= 0:
-      if debug: print('all hists 0!')
+      warnings.warn('all hists 0!')
       return False
 
     self.hist=hist={x:None for x in ['feed_dist','feed_prox','feed_evdist','feed_evprox','feed_pois']}
@@ -587,7 +588,7 @@ class SIMCanvas (FigureCanvas):
       # whether to draw the specgram - should draw if user saved it or have ongoing, poisson, or tonic inputs
       DrawSpec = loaded_dat and \
                 'spec' in ddat and \
-                (find_param(dfile['outparam'],'save_spec_data') or dinty['Ongoing'] or dinty['Poisson'] or dinty['Tonic'])
+                (quickgetprm(self.paramf,'save_spec_data',bool) or dinty['Ongoing'] or dinty['Poisson'] or dinty['Tonic'])
 
     if DrawSpec: # dipole axis takes fewer rows if also drawing specgram
       self.axdipole = self.figure.add_subplot(self.G[self.gRow:5,0]) # dipole

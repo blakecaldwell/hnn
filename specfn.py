@@ -22,24 +22,20 @@ import axes_create as ac
 
 # MorletSpec class based on a time vec tvec and a time series vec tsvec
 class MorletSpec():
-    def __init__(self, tvec, tsvec, fparam, f_max=None, p_dict=None, tmin = 50.0):
+    def __init__(self, tvec, tsvec, params, f_max=None, tmin = 50.0):
         # Save variable portion of fdata_spec as identifying attribute
         # self.name = fdata_spec
+
+        self.params = params
 
         # Import dipole data and remove extra dimensions from signal array.
         self.tvec = tvec
         self.tsvec = tsvec
 
-        # function is called this way because paramrw.read() returns 2 outputs
-        if p_dict is None:
-          self.p_dict = paramrw.read(fparam)[1]
-        else:
-          self.p_dict = p_dict
-
         # maximum frequency of analysis
         # Add 1 to ensure analysis is inclusive of maximum frequency
         if not f_max:
-            self.f_max = self.p_dict['f_max_spec'] + 1
+            self.f_max = self.params['f_max_spec'] + 1
         else:
             self.f_max = f_max + 1
 
@@ -47,13 +43,13 @@ class MorletSpec():
         self.tmin = tmin
 
         # truncate these vectors appropriately based on tmin
-        if self.p_dict['tstop'] > self.tmin:
+        if self.params['tstop'] > self.tmin:
             # must be done in this order! timeseries first!
             self.tsvec = self.tsvec[self.tvec >= self.tmin]
             self.tvec = self.tvec[self.tvec >= self.tmin]
 
         # Check that tstop is greater than tmin
-        if self.p_dict['tstop'] > self.tmin:
+        if self.params['tstop'] > self.tmin:
             # Array of frequencies over which to sort
             self.f = np.arange(1., self.f_max)
 
@@ -61,7 +57,7 @@ class MorletSpec():
             self.width = 7.
 
             # Calculate sampling frequency
-            self.fs = 1000. / self.p_dict['dt']
+            self.fs = 1000. / self.params['dt']
 
             # Generate Spec data
             self.TFR = self.__traces2TFR()
@@ -104,7 +100,7 @@ class MorletSpec():
         # range should probably be 0 to len(self.S_trans)
         # shift tvec to reflect change
         # this is in ms
-        self.t = 1000. * np.arange(1, len(self.S_trans)+1) / self.fs + self.tmin - self.p_dict['dt']
+        self.t = 1000. * np.arange(1, len(self.S_trans)+1) / self.fs + self.tmin - self.params['dt']
 
         # preallocation
         B = np.zeros((len(self.f), len(self.S_trans)))
@@ -875,30 +871,28 @@ def spec_current_kernel(fparam, fts, fspec, f_max):
 
 # Kernel for spec analysis of dipole data
 # necessary for parallelization
-def spec_dpl_kernel(fparam, fts, fspec, f_max):
-    dpl = dipolefn.Dipole(fts)
+def spec_dpl_kernel(params, dpl, fspec, f_max):
     dpl.units = 'nAm'
 
     # Do the conversion prior to generating these spec
     # dpl.convert_fAm_to_nAm()
 
     # Generate various spec results
-    spec_agg = MorletSpec(dpl.t, dpl.dpl['agg'], fparam, f_max)
-    spec_L2 = MorletSpec(dpl.t, dpl.dpl['L2'], fparam, f_max)
-    spec_L5 = MorletSpec(dpl.t, dpl.dpl['L5'], fparam, f_max)
+    spec_agg = MorletSpec(dpl.t, dpl.dpl['agg'], params, f_max)
+    spec_L2 = MorletSpec(dpl.t, dpl.dpl['L2'], params, f_max)
+    spec_L5 = MorletSpec(dpl.t, dpl.dpl['L5'], params, f_max)
 
     # Get max spectral power data
     # for now, only doing this for agg
     max_agg = spec_agg.max()
 
     # Generate periodogram resutls
-    p_dict = paramrw.read(fparam)[1]
-    pgram = Welch(dpl.t, dpl.dpl['agg'], p_dict['dt'])
+    pgram = Welch(dpl.t, dpl.dpl['agg'], params['dt'])
 
     # Save spec results
     np.savez_compressed(fspec, time=spec_agg.t, freq=spec_agg.f, TFR=spec_agg.TFR, max_agg=max_agg, t_L2=spec_L2.t, f_L2=spec_L2.f, TFR_L2=spec_L2.TFR, t_L5=spec_L5.t, f_L5=spec_L5.f, TFR_L5=spec_L5.TFR, pgram_p=pgram.P, pgram_f=pgram.f)
 
-def analysis_simp (opts, fparam, fdpl, fspec):
+def analysis_simp (opts, params, fdpl, fspec):
   opts_run = {'type': 'dpl_laminar',
               'f_max': 100.,
               'save_data': 0,
@@ -907,7 +901,7 @@ def analysis_simp (opts, fparam, fdpl, fspec):
   if opts:
     for key, val in opts.items():
       if key in opts_run.keys(): opts_run[key] = val
-  spec_dpl_kernel(fparam, fdpl, fspec, opts_run['f_max'])
+  spec_dpl_kernel(params, fdpl, fspec, opts_run['f_max'])
 
 # Does spec analysis for all files in simulation directory
 # ddata comes from fileio

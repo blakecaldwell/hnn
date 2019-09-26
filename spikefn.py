@@ -10,7 +10,7 @@ import scipy.signal as sps
 import matplotlib.pyplot as plt
 import itertools as it
 import os
-import paramrw
+import newparamrw as paramrw
 
 # meant as a class for ONE cell type
 class Spikes():
@@ -59,7 +59,7 @@ class Spikes():
 # Class to handle extinput event times
 class ExtInputs (Spikes):
   # class for external inputs - extracts gids and times
-  def __init__ (self, fspk, fparam, evoked=False):
+  def __init__ (self, fparam, fspk, evoked=False):
     # load gid and param dicts
     self.gid_dict, self.p_dict = paramrw.read(fparam)
     self.evoked = evoked

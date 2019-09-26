@@ -12,20 +12,15 @@ import time
 import shutil
 import numpy as np
 # Cells are defined in other files
-import network
-import fileio as fio
-from newparamrw import usingOngoingInputs
-import plotfn as plotfn
+import newparamrw d
 import specfn as specfn
-import pickle
+#import pickle
 import datetime
-from dipolefn import Dipole
 from conf import readconf
 from L5_pyramidal import L5Pyr
 from L2_pyramidal import L2Pyr
 from L2_basket import L2Basket
 from L5_basket import L5Basket
-from lfp import LFPElectrode
 
 import os.path as op
 
@@ -33,28 +28,13 @@ import os.path as op
 # Let us import hnn_core
 
 import hnn_core
-from hnn_core import simulate_dipole, Params, Network, shutdown
+from hnn_core import simulate_dipole, average_dipoles, get_rank, shutdown
+from hnn_core import Params, Network
 
 dconf = readconf()
 doutf = {}
 
-# NEEDS to be moved inside hnn-core
-# spike write function
-# def spikes_write (net, filename_spikes):
-#   f = open(filename_spikes,'w')
-#   f.close() # first make sure writes to an empty file
-#   for rank in range(int(pc.nhost())):
-#     # guarantees node order and no competition
-#     pc.barrier()
-#     if rank == int(pc.id()):
-#       # net.spiketimes and net.spikegids are type h.Vector()
-#       L = int(net.spikegids.size())
-#       with open(filename_spikes, 'a') as file_spikes:
-#         for i in range(L):
-#           file_spikes.write('%3.2f\t%d\n' % (net.spiketimes.x[i], net.spikegids.x[i]))
-#   # let all nodes iterate through loop in which only one rank writes
-#   pc.barrier()
-
+# TODO: should be moved to Network class in hnn core
 # # save somatic voltage of all cells to pkl object
 # def save_vsoma ():
 #   for host in range(int(pc.nhost())):
@@ -72,52 +52,37 @@ doutf = {}
 #     # print('dsomaout.keys():',dsomaout.keys(),'file:',doutf['file_vsoma'])
 #     pickle.dump(dsomaout,open(doutf['file_vsoma'],'wb'))
 
-# copies param file into root dsim directory
-def copy_paramfile (dsim, f_psim, str_date):
-  fout = os.path.join(dsim,f_psim.split(os.path.sep)[-1])
-  shutil.copyfile(f_psim,fout)
-  # open the new param file and append the date to it
-  with open(fout, 'a') as f_param: f_param.write('\nRun_Date: %s' % str_date)
-
-def savedat (p, dpl, net):
+def savedat (params, dpl, net, spikedata):
   global doutf
-  """
-  Writing the dipole output is now part of hnn-core.simulate_dipole, but the
-  remaining code for writing somatic current, output spikes, and lfp need
-  to be updated
-  """
 
-  pass
-  # write the somatic current to the file
+  newparamrw.write(doutf['file_param'], params, net.gid_dict)
+
+  dpl.write(doutf['file_dpl_norm'])
+
+  # TODO: this should be moved to Network class within hnn-core
+  # write the somatic current to a file
   # for now does not write the total but just L2 somatic and L5 somatic
-  # with open(doutf['file_current'], 'w') as fc:
-  #   for t, i_L2, i_L5 in zip(t_vec.x, net.current['L2Pyr_soma'].x, net.current['L5Pyr_soma'].x):
-  #     fc.write("%03.3f\t" % t)
-  #     # fc.write("%5.4f\t" % (i_L2 + i_L5))
-  #     fc.write("%5.4f\t" % i_L2)
-  #     fc.write("%5.4f\n" % i_L5)
-  # write output spikes
-  # file_spikes_tmp = fio.file_spike_tmp(dproj)
-  # spikes_write(net, file_spikes_tmp)
-  # # move the spike file to the spike dir
-  # if rank == 0: shutil.move(file_spikes_tmp, doutf['file_spikes'])
+  X = np.r_[[dpl.t, net.current['L2Pyr_soma'].x, net.current['L5Pyr_soma'].x]].T
+  np.savetxt(doutf['file_current'], X, fmt=['%3.3f', '%5.4f', '%5.4f'],
+              delimiter='\t')
+
+  # write spikes file
+  np.savetxt(doutf['file_spikes'], spikedata, fmt=['%3.2f', '%d'],
+              delimiter='\t')
+
   # if p['save_vsoma']: save_vsoma()
+
   # for i,elec in enumerate(lelec):
   #   elec.lfpout(fn=doutf['file_lfp'].split('.txt')[0]+'_'+str(i)+'.txt',tvec = t_vec)
 
 
-def runanalysis (prm, fparam, fdpl, fspec):
-  """ Needs to be updated for hnn-core """
-  #   if get_rank()==0: print("Running spectral analysis...",)
-  #   spec_opts = {'type': 'dpl_laminar',
-  #                'f_max': prm['f_max_spec'],
-  #                'save_data': 0,
-  #                'runtype': 'parallel',
-  #              }
-  #   t_start_analysis = time.time()
-  #   specfn.analysis_simp(spec_opts, fparam, fdpl, fspec) # run the spectral analysis
-  #   if get_rank()==0 and debug: print("time: %4.4f s" % (time.time() - t_start_analysis))
-
+def runanalysis (params, dpl, fspec):
+  spec_opts = {'type': 'dpl_laminar',
+                'f_max': params['f_max_spec'],
+                'save_data': 0,
+                'runtype': 'parallel',
+              }
+  specfn.analysis_simp(spec_opts, params, dpl, fspec) # run the spectral analysis
 
 def setupsimdir (params, f_psim):
   simdir = os.path.join(dconf['datdir'], params['sim_prefix'])
@@ -125,8 +90,7 @@ def setupsimdir (params, f_psim):
     os.mkdir(simdir)
   except FileExistsError:
     pass
-  str_date = datetime.datetime.now().strftime("%Y-%m-%d")
-  #copy_paramfile(simdir, f_psim, str_date)
+
   return simdir
 
 def getfname (ddir,key,trial=0,ntrial=1):
@@ -185,9 +149,7 @@ def arrangelayers (net):
 
 # All units for time: ms
 def runsim (f_psim):
-  t0 = time.time() # clock start time
-
-  params = Params(f_psim, json_fmt=False)
+  params = Params(f_psim)
 
   ddir = setupsimdir(params, f_psim) # one directory for all experiments
   # create rotating data files
@@ -196,58 +158,54 @@ def runsim (f_psim):
   net = Network(params)
   arrangelayers(net) # arrange cells in layers - for visualization purposes
 
-  dpl = simulate_dipole(net)
+  dpls = simulate_dipole(net, params['N_trials'])
+  spikedata = net.allreduce_spikes()
 
-  shutdown()
+  if get_rank() == 0:
+    if dpls == None:
+      print("ERR: Failed to start simulate_dipole")
+      exit(2)
 
-  if debug: print("Simulation run time: %4.4f s" % (time.time()-t0))
-  if debug: print("Simulation directory is: %s" % ddir.dsim)
-  if params['save_spec_data'] or usingOngoingInputs(doutf['file_param']):
-    runanalysis(params, doutf['file_param'], doutf['file_dpl_norm'], doutf['file_spec']) # run spectral analysis
+    avg_dpl = average_dipoles(dpls)
 
-  # below is not updated for hnn-core yet
+  if params['save_spec_data'] or newparamrw.usingOngoingInputs(f_psim):
+    spec = doutf['file_spec']
+    runanalysis(params, avg_dpl, spec) # run spectral analysis
 
-  # savedat(params, dpl, net)
-  # for elec in lelec: print('end; t_vec.size()',t_vec.size(),'elec.lfp_t.size()',elec.lfp_t.size())
+  if get_rank() == 0:
+    savedat(params, avg_dpl, net, spikedata)
 
-  # if params['save_figs']:
-  #   savefigs(params) # save output figures
+    # below are not updated for hnn-core yet
+    # for elec in lelec: print('end; t_vec.size()',t_vec.size(),'elec.lfp_t.size()',elec.lfp_t.size())
+
+    # if params['save_figs']:
+    #   savefigs(params) # save output figures
 
 if __name__ == "__main__":
+  f_psim = None
 
-  if dconf['dorun']:
+  # LFP is not working with hnn-core
+  # testLFP = dconf['testlfp']
+  # testlaminarLFP = dconf['testlaminarlfp']
+  # lelec = [] # list of LFP electrodes
 
-    hnn_core_root = op.join(op.dirname(hnn_core.__file__), '..')
+  # reads the specified param file
+  for i in range(len(sys.argv)):
+    if sys.argv[i].endswith('.json'):
+      f_psim = sys.argv[i]
+      break
+    if sys.argv[i].endswith('.param'):
+      f_psim = sys.argv[i]
+      break
 
-    # data directory - ./data
-    dproj = dconf['datdir'] # fio.return_data_dir(dconf['datdir'])
-    debug = dconf['debug']
-    f_psim = ''
-    ntrial = 1
-    simlength = 0.0
+  if f_psim is None:
+    f_psim = os.path.join('param','default.param')
 
-    # LFP is not working with hnn-core
-    # testLFP = dconf['testlfp']
-    # testlaminarLFP = dconf['testlaminarlfp']
-    # lelec = [] # list of LFP electrodes
-
-    # reads the specified param file
-    foundprm = False
-    for i in range(len(sys.argv)):
-      if sys.argv[i].endswith('.param'):
-        f_psim = sys.argv[i]
-        foundprm = True
-        if debug: print('using ',f_psim,' param file.')
-      elif sys.argv[i] == 'ntrial' and i+1<len(sys.argv):
-        ntrial = int(sys.argv[i+1])
-        if ntrial < 1: ntrial = 1
-        if debug: print('ntrial:',ntrial)
-      elif sys.argv[i] == 'simlength' and i+1<len(sys.argv):
-        simlength = float(sys.argv[i+1])
-        if debug: print('simlength:',simlength)
-
-    if not foundprm:
-      f_psim = os.path.join('param','default.param')
-      if debug: print(f_psim)
-
+  if os.path.exists(f_psim):
     runsim(f_psim)
+  else:
+    print("ERR: could not find param file: %s" % os.path.normpath(f_psim))
+    exit(1)
+
+  # terminate
+  shutdown()
