@@ -258,7 +258,7 @@ class RunSimThread (QThread):
     else:
       cmd = mpicmd + str(self.ncore) + nrniv_cmd + simf + ' ' + paramf
     simdat.dfile = getinputfiles(paramf)
-    print(cmd)
+
     cmdargs = shlex.split(cmd,posix="win" not in sys.platform) # https://github.com/maebert/jrnl/issues/348
     if debug: print("cmd:",cmd,"cmdargs:",cmdargs)
     if prtime:

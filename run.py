@@ -12,7 +12,7 @@ import time
 import shutil
 import numpy as np
 # Cells are defined in other files
-import newparamrw d
+import newparamrw
 import specfn as specfn
 #import pickle
 import datetime
@@ -67,7 +67,9 @@ def savedat (params, dpl, net, spikedata):
               delimiter='\t')
 
   # write spikes file
-  np.savetxt(doutf['file_spikes'], spikedata, fmt=['%3.2f', '%d'],
+  # combine into single sorted numpy array with a copy of the data
+  X = np.sort(np.c_[[spikedata[0], spikedata[1]]], axis=0).T
+  np.savetxt(doutf['file_spikes'], X, fmt=['%3.2f', '%d'],
               delimiter='\t')
 
   # if p['save_vsoma']: save_vsoma()
