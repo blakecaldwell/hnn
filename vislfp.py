@@ -95,9 +95,9 @@ def getCSD (dlfp,sampr,minf=0.1,maxf=300.0):
 try:
   ddat, maxlfp, tvec = readLFPs(basedir,ntrial) 
   if maxlfp > 1: laminar = True
-  ddat['spec'] = {}
-  waveprm = {'f_max_spec':40.0,'dt':tvec[1]-tvec[0],'tstop':tvec[-1]}
-  minwavet = 50.0
+  # ddat['spec'] = {}
+  # waveprm = {'f_max_spec':40.0,'dt':tvec[1]-tvec[0],'tstop':tvec[-1]}
+  # minwavet = 50.0
   sampr = 1e3 / (tvec[1]-tvec[0])
 
   if laminar:
@@ -108,29 +108,29 @@ try:
       for i in range(ntrial): ddat['avgCSD'] += ddat['CSD'][i]
       ddat['avgCSD']/=float(ntrial)
 
-  print('Extracting Wavelet spectrogram(s).')
-  for i in range(maxlfp+1):
-    for trial in range(ntrial):
-      ddat['spec'][(trial,i)] = MorletSpec(tvec, ddat['lfp'][(trial,i)][:,1],None,None,waveprm,minwavet)
-  if ntrial > 1:
-    if debug: print('here')
-    davglfp = {}; davgspec = {}
-    for i in range(maxlfp+1):
-      if debug: print(i,maxlfp,list(ddat['lfp'].keys())[0])
-      davglfp[i] = np.zeros(len(ddat['lfp'][list(ddat['lfp'].keys())[0]]),)
-      try:
-        ms = ddat['spec'][(0,0)]
-        if debug: print('shape',ms.TFR.shape,ms.tmin,ms.f[0],ms.f[-1])
-        davgspec[i] = [np.zeros(ms.TFR.shape), ms.tmin, ms.f]
-      except:
-        print('err in davgspec[i]=')
-      for trial in range(ntrial):
-        davglfp[i] += ddat['lfp'][(trial,i)][:,1]
-        davgspec[i][0] += ddat['spec'][(trial,i)].TFR
-      davglfp[i] /= float(ntrial)
-      davgspec[i][0] /= float(ntrial)
-    ddat['avglfp'] = davglfp
-    ddat['avgspec'] = davgspec
+  # print('Extracting Wavelet spectrogram(s).')
+  # for i in range(maxlfp+1):
+  #   for trial in range(ntrial):
+  #     ddat['spec'][(trial,i)] = MorletSpec(tvec, ddat['lfp'][(trial,i)][:,1],None,None,waveprm,minwavet)
+  # if ntrial > 1:
+  #   if debug: print('here')
+  #   davglfp = {}; davgspec = {}
+  #   for i in range(maxlfp+1):
+  #     if debug: print(i,maxlfp,list(ddat['lfp'].keys())[0])
+  #     davglfp[i] = np.zeros(len(ddat['lfp'][list(ddat['lfp'].keys())[0]]),)
+  #     try:
+  #       ms = ddat['spec'][(0,0)]
+  #       if debug: print('shape',ms.TFR.shape,ms.tmin,ms.f[0],ms.f[-1])
+  #       davgspec[i] = [np.zeros(ms.TFR.shape), ms.tmin, ms.f]
+  #     except:
+  #       print('err in davgspec[i]=')
+  #     for trial in range(ntrial):
+  #       davglfp[i] += ddat['lfp'][(trial,i)][:,1]
+  #       davgspec[i][0] += ddat['spec'][(trial,i)].TFR
+  #     davglfp[i] /= float(ntrial)
+  #     davgspec[i][0] /= float(ntrial)
+  #   ddat['avglfp'] = davglfp
+  #   ddat['avgspec'] = davgspec
 except:
   print('Could not load LFPs')
   quit()
@@ -168,7 +168,11 @@ class LFPCanvas (FigureCanvas):
       pass
 
   def drawCSD (self, fig, G):
-    ax = fig.add_subplot(G[:,2])
+    import matplotlib.colors as colors
+    from scipy import interpolate
+    from numpy import linspace, where, zeros
+
+    ax = fig.add_subplot(G[:,1])
     ax.set_yticks([])
     lw = 2; clr = 'k'
     if ntrial > 1:
@@ -187,8 +191,27 @@ class LFPCanvas (FigureCanvas):
           y = yfctr[i] * getnorm(ddat['CSD'][self.index-1][i,:]) + yoff[i]
           ax.plot(tvec,y,clr,linewidth=lw)
     else:
+      tmin = 0
+      tmax = tstop
+      (idx_min, idx_max) = (where(tvec==tmin)[0][0], where(tvec==tmax)[0][0])
+      X = tvec[idx_min:idx_max]
+      mask = zeros(len(tvec), dtype=bool)
+      mask[idx_min:idx_max] = True
+      CSD_trim_X = ddat['CSD'][0][:,mask]
+
+      Y = range(CSD_trim_X.shape[0])
+      CSD_spline=interpolate.RectBivariateSpline(Y, X, CSD_trim_X)
+      HNN_Y_plot = linspace(Y[0],Y[-1],num=1000)
+      Z = -CSD_spline(HNN_Y_plot, X)
+      Z = Z/max(abs(Z.max()),abs(Z.min()))
+
       # draw CSD as image; blue/red corresponds to excit/inhib
-      cax = ax.imshow(ddat['CSD'][0],extent=[0, tstop, 0, 15], aspect='auto', origin='upper',cmap=plt.get_cmap('jet'),interpolation='None')
+      cax = ax.imshow(Z, extent=[tmin, tmax, 0, maxlfp-1],
+                      aspect='auto', origin='upper',
+                      cmap=plt.get_cmap('jet'), interpolation='None', 
+                      norm=colors.SymLogNorm(linthresh=0.010, linscale=0.001,
+                                             vmin=Z.min(),
+                                             vmax=-Z.min()))
       # overlay the time-series
       yrng,yfctr,yoff = getrngfctroff(ddat['CSD'][0])
       for i in range(ddat['CSD'][0].shape[0]):
@@ -196,13 +219,13 @@ class LFPCanvas (FigureCanvas):
         ax.plot(tvec,y,clr,linewidth=lw)
     cbaxes = fig.add_axes([0.69, 0.88, 0.005, 0.1]) 
     fig.colorbar(cax, cax=cbaxes, orientation='vertical')
-    ax.set_xlim((minwavet,tstop)); ax.set_ylim((0,maxlfp-1))
+    ax.set_xlim((0,tstop)); ax.set_ylim((0,maxlfp-1))
 
   def drawLFP (self, fig):
 
     if laminar:
       nrow = maxlfp+1
-      ncol = 3
+      ncol = 2
       ltitle = ['' for x in range(nrow*ncol)]
     else:
       nrow = (maxlfp+1) * 2
@@ -252,28 +275,28 @@ class LFPCanvas (FigureCanvas):
         ax.plot(tvec,ddat['lfp'][(self.index-1,nlfp)][:,1],color='white',linewidth=2)
 
       if not laminar: ax.set_ylabel(r'$\mu V$')
-      if tstop != -1: ax.set_xlim((minwavet,tstop))
+      if tstop != -1: ax.set_xlim((0,tstop))
       ax.set_ylim(yl)
 
       ax.set_facecolor('k'); ax.grid(True); ax.set_title(title)
 
-      # plot wavelet spectrogram
-      if laminar: ax = fig.add_subplot(G[nlfp, 1])
-      else: ax = fig.add_subplot(G[nlfp*2+1])
-      self.lax.append(ax)
-      if self.index == 0:
-        if ntrial > 1:
-          TFR,tmin,F = ddat['avgspec'][nlfp]
-          ax.imshow(TFR, extent=[tmin, tvec[-1], F[-1], F[0]], aspect='auto', origin='upper',cmap=plt.get_cmap('jet'))
-        else:
-          ms = ddat['spec'][(0,nlfp)]
-          ax.imshow(ms.TFR, extent=[ms.tmin, tvec[-1], ms.f[-1], ms.f[0]], aspect='auto', origin='upper',cmap=plt.get_cmap('jet'))
-      else:
-        ms = ddat['spec'][(self.index-1,nlfp)]
-        ax.imshow(ms.TFR, extent=[ms.tmin, tvec[-1], ms.f[-1], ms.f[0]], aspect='auto', origin='upper',cmap=plt.get_cmap('jet'))
-      ax.set_xlim(minwavet,tvec[-1])
-      if nlfp == maxlfp: ax.set_xlabel('Time (ms)')
-      if not laminar: ax.set_ylabel('Frequency (Hz)');
+      # # plot wavelet spectrogram
+      # if laminar: ax = fig.add_subplot(G[nlfp, 1])
+      # else: ax = fig.add_subplot(G[nlfp*2+1])
+      # self.lax.append(ax)
+      # if self.index == 0:
+      #   if ntrial > 1:
+      #     TFR,tmin,F = ddat['avgspec'][nlfp]
+      #     ax.imshow(TFR, extent=[tmin, tvec[-1], F[-1], F[0]], aspect='auto', origin='upper',cmap=plt.get_cmap('jet'))
+      #   else:
+      #     ms = ddat['spec'][(0,nlfp)]
+      #     ax.imshow(ms.TFR, extent=[ms.tmin, tvec[-1], ms.f[-1], ms.f[0]], aspect='auto', origin='upper',cmap=plt.get_cmap('jet'))
+      # else:
+      #   ms = ddat['spec'][(self.index-1,nlfp)]
+      #   ax.imshow(ms.TFR, extent=[ms.tmin, tvec[-1], ms.f[-1], ms.f[0]], aspect='auto', origin='upper',cmap=plt.get_cmap('jet'))
+      # ax.set_xlim(minwavet,tvec[-1])
+      # if nlfp == maxlfp: ax.set_xlabel('Time (ms)')
+      # if not laminar: ax.set_ylabel('Frequency (Hz)');
 
     if laminar: self.drawCSD(fig, G)
 

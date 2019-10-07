@@ -61,7 +61,6 @@ parseargs()
 simf = dconf['simf']
 paramf = dconf['paramf']
 debug = dconf['debug']
-testLFP = dconf['testlfp'] or dconf['testlaminarlfp']
 basedir = None
 
 # get default number of cores
@@ -2955,11 +2954,10 @@ class HNNGUI (QMainWindow):
     viewSomaVAction.triggered.connect(self.showSomaVPlot)
     viewMenu.addAction(viewSomaVAction)
 
-    if testLFP:
-      viewLFPAction = QAction('View Simulation LFPs',self)
-      viewLFPAction.setStatusTip('View LFP')
-      viewLFPAction.triggered.connect(self.showLFPPlot)
-      viewMenu.addAction(viewLFPAction)
+    viewLFPAction = QAction('View Simulation LFPs',self)
+    viewLFPAction.setStatusTip('View LFP')
+    viewLFPAction.triggered.connect(self.showLFPPlot)
+    viewMenu.addAction(viewLFPAction)
 
     viewSpecAction = QAction('View Spectrograms',self)
     viewSpecAction.setStatusTip('View Spectrograms/Dipoles from Experimental Data')
