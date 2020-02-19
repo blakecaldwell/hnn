@@ -41,9 +41,6 @@ class Cell ():
       self.ncfrom_extgauss = []
       self.ncfrom_extpois = []
       self.ncfrom_ev = []
-      self.dpl_vec = h.Vector(1)
-      self.dpl_val = self.dpl_vec._ref_x[0]
-      self.dpl = h.Vector().record(self.dpl_val)
 
     def record_volt_soma (self):
       self.vsoma = h.Vector()
@@ -314,6 +311,17 @@ class Pyr (Cell):
         self.dends = {}
         # for legacy use with L5Pyr
         self.list_dend = []
+
+    def record_dpl (self):
+      mt = h.MechanismType(1)
+      mt.select("IClamp")
+      pp = mt.pp_begin(sec=self.soma)
+      self.dpl_vec = h.Vector(1)
+      self.dpl_val = self.dpl_vec._ref_x[0]
+      self.dpl = h.Vector().record(pp, self.dpl_val)
+
+      self.yscale = self.get_sectnames()
+      self.dipole_insert(self.yscale)
 
     # Create dictionary of section names with entries to scale section lengths to length along z-axis
     def get_sectnames (self):

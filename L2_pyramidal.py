@@ -44,10 +44,6 @@ class L2Pyr(Pyr):
         self.__biophys_soma()
         self.__biophys_dends()
 
-        # dipole_insert() comes from Cell()
-        self.yscale = self.get_sectnames()
-        self.dipole_insert(self.yscale)
-
         # create synapses
         self.__synapse_create(p_syn)
         # self.__synapse_create()

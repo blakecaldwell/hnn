@@ -37,6 +37,7 @@ dconf = readconf()
 dproj = dconf['datdir'] # fio.return_data_dir(dconf['datdir'])
 debug = dconf['debug']
 pc = h.ParallelContext()
+pc.nthread(2)
 pcID = int(pc.id())
 f_psim = ''
 ntrial = 1
@@ -409,12 +410,15 @@ def runsim ():
   t0 = time.time() # clock start time
 
   pc.set_maxstep(10) # sets the default max solver step in ms (purposefully large)
+  mindelay = pc.allreduce(pc.set_maxstep(10), 2) # flag 2 returns minimum value
+  if pcID==0: print(('Minimum delay (time-step for queue exchange) is %.2f'%(mindelay)))
 
   for elec in lelec:
     elec.setup()
     elec.LFPinit()
 
   cvode = h.CVode()
+  cvode.active(0)
   cvode.cache_efficient(1)
 
   h.finitialize() # initialize cells to -65 mV, after all the NetCon delays have been specified
@@ -444,7 +448,7 @@ def runsim ():
   for elec in lelec: print('end; t_vec.size()',t_vec.size(),'elec.lfp_t.size()',elec.lfp_t.size())
 
   if pcID == 0:
-    if debug: print("Simulation run time: %4.4f s" % (time.time()-t0))
+    print("Simulation run time: %4.4f s" % (time.time()-t0))
     if debug: print("Simulation directory is: %s" % ddir.dsim)
     if paramrw.find_param(doutf['file_param'],'save_spec_data') or usingOngoingInputs(doutf['file_param']):
       runanalysis(p, doutf['file_param'], doutf['file_dpl_norm'], doutf['file_spec']) # run spectral analysis
