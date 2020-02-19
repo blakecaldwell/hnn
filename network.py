@@ -33,6 +33,10 @@ class NetworkOnNode ():
         'L5Pyr_soma': h.Vector(self.N_t, 0),
         'L2Pyr_soma': h.Vector(self.N_t, 0),
       }
+      self.dpls = {
+          'L5Pyr': h.Vector(self.N_t, 0),
+          'L2Pyr': h.Vector(self.N_t, 0),
+      }
       # int variables for grid of pyramidal cells (for now in both L2 and L5)
       self.gridpyr = {
         'x': self.p['N_pyr_x'],
@@ -385,6 +389,14 @@ class NetworkOnNode ():
             # self.current_L5Pyr_soma was created upon
             # in parallel, each node has its own Net()
             self.current['L2Pyr_soma'].add(I_soma)
+
+    def aggregate_dpls(self):
+        """This method must be run post-integration."""
+
+        for gid, cell in zip(self.__gid_list, self.cells):
+            if self.pc.gid_exists(gid):
+                if cell.celltype in ('L5_pyramidal', 'L2_pyramidal'):
+                    self.dpls[cell.name].add(cell.dpl)
 
     # recording debug function
     def rec_debug (self, rank_exec, gid):

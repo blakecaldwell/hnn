@@ -238,9 +238,6 @@ simparams = p = p_exp.return_pdict(expmt_group, 0) # return the param dict for t
 pc.barrier() # get all nodes to this place before continuing
 pc.gid_clear()
 
-# global variables, should be node-independent
-h("dp_total_L2 = 0."); h("dp_total_L5 = 0.")
-
 # Set tstop before instantiating any classes
 if simlength > 0.0:
   h.tstop = simlength
@@ -254,8 +251,6 @@ file_spikes_tmp = fio.file_spike_tmp(dproj)
 net = network.NetworkOnNode(p) # create node-specific network
 
 t_vec = h.Vector(); t_vec.record(h._ref_t) # time recording
-dp_rec_L2 = h.Vector(); dp_rec_L2.record(h._ref_dp_total_L2) # L2 dipole recording
-dp_rec_L5 = h.Vector(); dp_rec_L5.record(h._ref_dp_total_L5) # L5 dipole recording  
 
 net.movecellstopos() # position cells in 2D grid
 
@@ -419,6 +414,9 @@ def runsim ():
     elec.setup()
     elec.LFPinit()
 
+  cvode = h.CVode()
+  cvode.cache_efficient(1)
+
   h.finitialize() # initialize cells to -65 mV, after all the NetCon delays have been specified
   if pcID == 0: 
     for tt in range(0,int(h.tstop),printdt): h.cvode.event(tt, prsimtime) # print time callbacks
@@ -429,18 +427,19 @@ def runsim ():
   pc.barrier()
 
   # these calls aggregate data across procs/nodes
-  pc.allreduce(dp_rec_L2, 1); 
-  pc.allreduce(dp_rec_L5, 1) # combine dp_rec on every node, 1=add contributions together  
   for elec in lelec: elec.lfp_final()
   net.aggregate_currents() # aggregate the currents independently on each proc
+  net.aggregate_dpls()
   # combine net.current{} variables on each proc
   pc.allreduce(net.current['L5Pyr_soma'], 1); pc.allreduce(net.current['L2Pyr_soma'], 1)
+  pc.allreduce(net.dpls['L5Pyr'], 1)
+  pc.allreduce(net.dpls['L2Pyr'], 1)
 
   pc.barrier()
 
   # write time and calculated dipole to data file only if on the first proc
   # only execute this statement on one proc
-  savedat(p, pcID, t_vec, dp_rec_L2, dp_rec_L5, net)
+  savedat(p, pcID, t_vec, net.dpls['L2Pyr'], net.dpls['L5Pyr'], net)
 
   for elec in lelec: print('end; t_vec.size()',t_vec.size(),'elec.lfp_t.size()',elec.lfp_t.size())
 

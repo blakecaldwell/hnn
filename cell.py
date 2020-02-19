@@ -7,9 +7,6 @@
 import numpy as np
 from neuron import h
 
-# global variables, should be node-independent
-h("dp_total_L2 = 0."); h("dp_total_L5 = 0.") # put here since these variables used in cells
-
 # Units for e: mV
 # Units for gbar: S/cm^2
 
@@ -44,6 +41,9 @@ class Cell ():
       self.ncfrom_extgauss = []
       self.ncfrom_extpois = []
       self.ncfrom_ev = []
+      self.dpl_vec = h.Vector(1)
+      self.dpl_val = self.dpl_vec._ref_x[0]
+      self.dpl = h.Vector().record(self.dpl_val)
 
     def record_volt_soma (self):
       self.vsoma = h.Vector()
@@ -121,10 +121,7 @@ class Cell ():
             # sets pointers in dipole mod file to the correct locations
             # h.setpointer(ref, ptr, obj)
             h.setpointer(sect(0.99)._ref_v, 'pv', dpp)
-            if self.celltype.startswith('L2'):
-                h.setpointer(h._ref_dp_total_L2, 'Qtotal', dpp)
-            elif self.celltype.startswith('L5'):
-                h.setpointer(h._ref_dp_total_L5, 'Qtotal', dpp)
+            h.setpointer(self.dpl_val, 'Qtotal', dpp)
             # gives INTERNAL segments of the section, non-endpoints
             # creating this because need multiple values simultaneously
             loc = np.array([seg.x for seg in sect])
@@ -147,11 +144,7 @@ class Cell ():
                 else:
                     h.setpointer(sect(0)._ref_v, 'pv', sect(loc[i]).dipole)
                 # set aggregate pointers
-                h.setpointer(dpp._ref_Qsum, 'Qsum', sect(loc[i]).dipole)
-                if self.celltype.startswith('L2'):
-                    h.setpointer(h._ref_dp_total_L2, 'Qtotal', sect(loc[i]).dipole)
-                elif self.celltype.startswith('L5'):
-                    h.setpointer(h._ref_dp_total_L5, 'Qtotal', sect(loc[i]).dipole)
+                h.setpointer(self.dpl_val, 'Qtotal', sect(loc[i]).dipole)
                 # add ztan values
                 sect(loc[i]).dipole.ztan = y_diff[i]
             # set the pp dipole's ztan value to the last value from y_diff
