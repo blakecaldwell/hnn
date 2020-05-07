@@ -34,10 +34,12 @@ export -f cleanup
 
 # start the docker pull in the background
 find_program_print docker
-(retry_docker_pull && touch $HOME/docker_image_loaded) &
+retry_docker_pull &
+PULL_PID=$!
 
 # enable windows remoting service to log in as a different user to run tests
 powershell -Command 'Start-Service -Name WinRM' > /dev/null
+powershell -Command 'Start-Service -Name seclogon' > /dev/null
 
 # change settings to allow a blank password for TEST_USER
 reg add HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Lsa //t REG_DWORD //v LimitBlankPasswordUse //d 0 //f 2>&1 > /dev/null
@@ -65,6 +67,11 @@ else
   exit 2
 fi
 
+echo "Installing Microsoft MPI"
+powershell -command "(New-Object System.Net.WebClient).DownloadFile('https://github.com/microsoft/Microsoft-MPI/releases/download/v10.1.1/msmpisetup.exe', 'msmpisetup.exe')" && \
+    ./msmpisetup.exe -unattend && \
+    rm -f msmpisetup.exe
+
 echo "Starting Windows install script..."
 powershell.exe -ExecutionPolicy Bypass -File ./installer/windows/hnn.ps1 &
 POWERSHELL_PID=$!
@@ -78,25 +85,29 @@ FILENAME="$HOME/vcxsrv-64.1.20.8.1.installer.exe"
 start_download "$FILENAME" "$URL" > /dev/null &
 VCXSRV_PID=$!
 
-# install msys2 to get opengl32.dll from mesa
-# this is needed to be able to start vcxsrv for docker tests
-[[ ! -f C:/tools/msys64/msys2_shell.cmd ]] && rm -rf C:/tools/msys64
-choco uninstall -y mingw
-
 # install vcxsrv for docker tests
 echo "Waiting for VcXsrv download to finish..."
 NAME="downloading VcXsrv"
 wait_for_pid "${VCXSRV_PID}" "$NAME"
 
+echo "Installing Ubuntu WSL..."
+powershell.exe -ExecutionPolicy Bypass -File ./scripts/setup-wsl.ps1 &
+WSL_PID=$!
+
+# install msys2 to get opengl32.dll from mesa
+# this is needed to be able to start vcxsrv for docker tests
+[[ ! -f C:/tools/msys64/msys2_shell.cmd ]] && rm -rf C:/tools/msys64
+choco uninstall -y mingw
+
 echo "Installing msys2 with choco..."
-choco upgrade --no-progress -y msys2 &
+choco upgrade --no-progress -y msys2 > /dev/null 2>&1 &
 MSYS2_PID=$!
 
 echo "Installing VcXsrv..."
 cmd //c "$HOME/vcxsrv-64.1.20.8.1.installer.exe /S"
 
 echo "Waiting for msys2 installation to finish..."
-NAME="isntalling msys2"
+NAME="installing msys2"
 wait_for_pid "${MSYS2_PID}" "$NAME"
 
 export msys2='cmd //C RefreshEnv.cmd '
@@ -105,4 +116,22 @@ export msys2+='& C:\\tools\\msys64\\msys2_shell.cmd -defterm -no-start'
 export mingw64="$msys2 -mingw64 -full-path -here -c "\"\$@"\" --"
 export msys2+=" -msys2 -c "\"\$@"\" --"
 $msys2 pacman --sync --noconfirm --needed mingw-w64-x86_64-mesa &
-# the command above will complete before the docker test begins
+MESA_PID=$!
+
+echo "Waiting for WSL install to finish..."
+NAME="installing WSL"
+wait_for_pid "${WSL_PID}" "$NAME"
+touch $HOME/docker_image_loaded
+runas //user:travis "powershell -Command 'Add-AppxPackage .\Ubuntu.appx'" < "$HOME/test_user_creds" || true
+
+#echo "Configuring Ubuntu WSL..."
+#./Ubuntu/Ubuntu1804.exe config --default-user root
+
+echo "Waiting for docker pull to finish..."
+NAME="pulling docker image"
+wait_for_pid "${PULL_PID}" "$NAME"
+touch $HOME/docker_image_loaded
+
+echo "Waiting for MESA library installation to finish..."
+NAME="installing MESA library files"
+wait_for_pid "${MESA_PID}" "$NAME"

@@ -1,9 +1,9 @@
 $ErrorActionPreference = "Stop"
 
 ( Enable-PSRemoting -Force -SkipNetworkProfileCheck ) | out-null
-winrm set winrm/config/service '@{AllowUnencrypted="true"}'
-winrm set winrm/config/service/auth '@{Basic="true"}'
-winrm set winrm/config/client '@{AllowUnencrypted="true"}'
+(winrm set winrm/config/service '@{AllowUnencrypted="true"}' ) | out-null
+(winrm set winrm/config/service/auth '@{Basic="true"}' ) | out-null
+(winrm set winrm/config/client '@{AllowUnencrypted="true"}' ) | out-null
 
 # create credentials with no password
 ( $Credentials = [System.Management.Automation.PSCredential]::new("test user",[System.Security.SecureString]::new()) ) | out-null
@@ -12,7 +12,6 @@ winrm set winrm/config/client '@{AllowUnencrypted="true"}'
 ( $opt = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck -NoEncryption ) | out-null
 
 # Create a new session (login)
-$session = New-PSSession -ComputerName localhost -SessionOption $opt -Authentication Basic -Credential $Credentials
 
 # Run the bash command as 'test user'
 $env:ret = $false

@@ -30,3 +30,7 @@ export -f cleanup
 cd "$DIR/../"
 export PATH=$PATH:/C/tools/msys64/mingw64/bin
 USE_SSH=0 "./hnn_docker.sh" start || script_fail
+
+echo "Running WSL test"
+echo
+wsl USE_SSH=0 "./hnn_docker.sh" start || script_fail

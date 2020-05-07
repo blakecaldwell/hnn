@@ -6,7 +6,7 @@ export TRAVIS_TESTING=1
 source scripts/utils.sh
 export -f sha256sum
 
-export DOCKER_IMAGE_NAME="jonescompneurolab/hnn:master"
+export DOCKER_IMAGE_NAME="jonescompneurolab/hnn:latest"
 export BASE_QEMU_OPTS="--disable-cocoa --disable-curses --disable-vnc --disable-vde \
                         --disable-pie --disable-libusb --disable-hax --disable-kvm \
                         --disable-debug-info --disable-docs --disable-nettle \
@@ -223,8 +223,9 @@ NAME="downloading HNN docker image"
 wait_for_pid "${IMAGE_PID}" "$NAME"
 echo "Loading downloaded image into docker"
 (tar -cC "$HOME/docker_image" . | docker load && \
-docker tag jonescompneurolab/hnn:master jonescompneurolab/hnn:latest && \
 touch $HOME/docker_image_loaded) &
+
+# docker tag jonescompneurolab/hnn:latest jonescompneurolab/hnn:latest && \
 
 # hack so that NEURON install doesn't take forever
 sudo kill -9 $NRN_INSTALL_PID && wait $NRN_INSTALL_PID || {
