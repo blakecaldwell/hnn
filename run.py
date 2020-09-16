@@ -12,7 +12,7 @@ import time
 import shutil
 import numpy as np
 # Cells are defined in other files
-import newparamrw
+from  paramrw import write_gid_dict, usingOngoingInputs
 import specfn as specfn
 #import pickle
 import datetime
@@ -24,17 +24,11 @@ from L5_basket import L5Basket
 
 import os.path as op
 
-###############################################################################
-# Let us import hnn_core
-
-import hnn_core
-from hnn_core import simulate_dipole, average_dipoles, get_rank, shutdown
-from hnn_core import Params, Network
+from hnn_core import simulate_dipole, read_params, Network, MPIBackend
+from hnn_core.dipole import average_dipoles
 
 dconf = readconf()
-doutf = {}
 
-# TODO: should be moved to Network class in hnn core
 # # save somatic voltage of all cells to pkl object
 # def save_vsoma ():
 #   for host in range(int(pc.nhost())):
@@ -52,41 +46,8 @@ doutf = {}
 #     # print('dsomaout.keys():',dsomaout.keys(),'file:',doutf['file_vsoma'])
 #     pickle.dump(dsomaout,open(doutf['file_vsoma'],'wb'))
 
-def savedat (params, dpl, net, spikedata):
-  global doutf
 
-  newparamrw.write(doutf['file_param'], params, net.gid_dict)
-
-  dpl.write(doutf['file_dpl_norm'])
-
-  # TODO: this should be moved to Network class within hnn-core
-  # write the somatic current to a file
-  # for now does not write the total but just L2 somatic and L5 somatic
-  X = np.r_[[dpl.t, net.current['L2Pyr_soma'].x, net.current['L5Pyr_soma'].x]].T
-  np.savetxt(doutf['file_current'], X, fmt=['%3.3f', '%5.4f', '%5.4f'],
-              delimiter='\t')
-
-  # write spikes file
-  # combine into single sorted numpy array with a copy of the data
-  X = np.sort(np.c_[[spikedata[0], spikedata[1]]], axis=0).T
-  np.savetxt(doutf['file_spikes'], X, fmt=['%3.2f', '%d'],
-              delimiter='\t')
-
-  # if p['save_vsoma']: save_vsoma()
-
-  # for i,elec in enumerate(lelec):
-  #   elec.lfpout(fn=doutf['file_lfp'].split('.txt')[0]+'_'+str(i)+'.txt',tvec = t_vec)
-
-
-def runanalysis (params, dpl, fspec):
-  spec_opts = {'type': 'dpl_laminar',
-                'f_max': params['f_max_spec'],
-                'save_data': 0,
-                'runtype': 'parallel',
-              }
-  specfn.analysis_simp(spec_opts, params, dpl, fspec) # run the spectral analysis
-
-def setupsimdir (params, f_psim):
+def setupsimdir (params):
   simdir = os.path.join(dconf['datdir'], params['sim_prefix'])
   try:
     os.mkdir(simdir)
@@ -119,26 +80,12 @@ def getfname (ddir,key,trial=0,ntrial=1):
     return os.path.join(ddir,datatypes[key][0] + '_' + str(trial) + datatypes[key][1])
     
 
-# create file names
-def setoutfiles (ddir,trial=0,ntrial=1):
-  # if get_rank()==0: print('setoutfiles:',trial,ntrial)
-  global doutf
-  doutf['file_dpl'] = getfname(ddir,'rawdpl',trial,ntrial)
-  doutf['file_current'] = getfname(ddir,'rawcurrent',trial,ntrial)
-  doutf['file_param'] = getfname(ddir, 'param',trial,ntrial)
-  doutf['file_spikes'] = getfname(ddir, 'rawspk',trial,ntrial)
-  doutf['file_spec'] = getfname(ddir, 'rawspec',trial,ntrial)
-  doutf['filename_debug'] = 'debug.dat'
-  doutf['file_dpl_norm'] = getfname(ddir,'normdpl',trial,ntrial)
-  doutf['file_vsoma'] = getfname(ddir,'vsoma',trial,ntrial)
-  doutf['file_lfp'] = getfname(ddir,'lfp',trial,ntrial)
-  #if get_rank()==0: print('doutf:',doutf)
-  return doutf
-
 def expandbbox (boxA, boxB):
   return [(min(boxA[i][0],boxB[i][0]),max(boxA[i][1],boxB[i][1]))  for i in range(3)]
 
 def arrangelayers (net):
+  # NOTE: will not work with hnn-core as-is. this code modifies NetworkBuilder attributes
+
   # offsets for L2, L5 cells so that L5 below L2 in display
   dyoff = {L2Pyr: 1000, 'L2_pyramidal' : 1000,
            L5Pyr: -1000-149.39990234375, 'L5_pyramidal' : -1000-149.39990234375,
@@ -149,65 +96,65 @@ def arrangelayers (net):
   for cell in net.cells:
     dbbox[cell.celltype] = expandbbox(dbbox[cell.celltype], cell.getbbox())
 
+
 # All units for time: ms
-def runsim (f_psim):
-  params = Params(f_psim)
+def simulate (params, n_core):
 
-  ddir = setupsimdir(params, f_psim) # one directory for all experiments
-  # create rotating data files
-  setoutfiles(ddir)
-
+  # create the network from the parameter file. note, NEURON objects haven't been created yet
   net = Network(params)
-  arrangelayers(net) # arrange cells in layers - for visualization purposes
 
-  dpls = simulate_dipole(net, params['N_trials'])
-  spikedata = net.allreduce_spikes()
+  # TODO: add arrangelayers() to hnn-core or remove
+  # arrange cells in layers - for visualization purposes
+  # arrangelayers(net)
+  ddir = setupsimdir(params)
 
-  if get_rank() == 0:
-    if dpls == None:
-      print("ERR: Failed to start simulate_dipole")
-      exit(2)
+  # run the simulation with MPI because the user is waiting for it to complete
+  with MPIBackend(n_procs=n_core, mpi_cmd='mpiexec'):
+    dpls = simulate_dipole(net, params['N_trials'])
 
+  if len(dpls) > 1:
     avg_dpl = average_dipoles(dpls)
-
-  if params['save_spec_data'] or newparamrw.usingOngoingInputs(f_psim):
-    spec = doutf['file_spec']
-    runanalysis(params, avg_dpl, spec) # run spectral analysis
-
-  if get_rank() == 0:
-    savedat(params, avg_dpl, net, spikedata)
-
-    # below are not updated for hnn-core yet
-    # for elec in lelec: print('end; t_vec.size()',t_vec.size(),'elec.lfp_t.size()',elec.lfp_t.size())
-
-    # if params['save_figs']:
-    #   savefigs(params) # save output figures
-
-if __name__ == "__main__":
-  f_psim = None
-
-  # LFP is not working with hnn-core
-  # testLFP = dconf['testlfp']
-  # testlaminarLFP = dconf['testlaminarlfp']
-  # lelec = [] # list of LFP electrodes
-
-  # reads the specified param file
-  for i in range(len(sys.argv)):
-    if sys.argv[i].endswith('.json'):
-      f_psim = sys.argv[i]
-      break
-    if sys.argv[i].endswith('.param'):
-      f_psim = sys.argv[i]
-      break
-
-  if f_psim is None:
-    f_psim = os.path.join('param','default.param')
-
-  if os.path.exists(f_psim):
-    runsim(f_psim)
   else:
-    print("ERR: could not find param file: %s" % os.path.normpath(f_psim))
-    exit(1)
+    avg_dpl = dpls
 
-  # terminate
-  shutdown()
+  # HNN workflow requires some files to be written to disk. This sets up the directory for all output files
+  ddir = setupsimdir(params)
+
+  # now write the files
+  net.spikes.write(os.path.join(ddir, 'spk_%d.txt'))
+
+  # TODO: the gid_dict is needed forsome plotting functions. Can this be removed if spk.txt
+  # is new hnn-core format with 3 columns (including spike type)?
+  write_gid_dict(os.path.join(ddir,'gid_dict.txt'), net.gid_dict)
+
+  for trial_idx, dpl in enumerate(dpls):
+    file_dipole =  getfname(ddir,'normdpl', trial_idx, params['N_trials'])
+    dpl.write(file_dipole)
+
+    # TODO: this should be moved to Network class within hnn-core
+    # write the somatic current to a file
+    # for now does not write the total but just L2 somatic and L5 somatic
+    # X = np.r_[[dpl.t, net.current['L2Pyr_soma'].x, net.current['L5Pyr_soma'].x]].T
+    # file_current = getfname(ddir, 'rawcurrent', trial_idx, params['N_trials'])
+    # np.savetxt(file_current, X, fmt=['%3.3f', '%5.4f', '%5.4f'],
+    #             delimiter='\t')
+
+    # TODO: save_vsoma is coded to work in parallel, so it should be moved to
+    # hnn_core.parallel_backends
+    # if p['save_vsoma']:
+    #   save_vsoma()()
+
+    if params['save_spec_data'] or usingOngoingInputs(params):
+      specfn = getfname(ddir, 'rawspec', trial_idx, params['N_trials'])
+      spec_opts = {'type': 'dpl_laminar',
+                    'f_max': params['f_max_spec'],
+                    'save_data': 0,
+                    'runtype': 'parallel',
+                  }
+      specfn.analysis_simp(spec_opts, params, dpl, specfn) # run the spectral analysis
+
+  # NOTE: the savefigs functionality is quite complicated and rewriting from scratch in hnn-core is probably
+  # a much better option that allows deprecating the large amount of legacy code
+
+  # if params['save_figs']:
+  #   savefigs(params) # save output figures

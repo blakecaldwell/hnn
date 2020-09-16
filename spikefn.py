@@ -10,7 +10,7 @@ import scipy.signal as sps
 import matplotlib.pyplot as plt
 import itertools as it
 import os
-import newparamrw as paramrw
+import paramrw
 
 # meant as a class for ONE cell type
 class Spikes():

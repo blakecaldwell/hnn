@@ -20,21 +20,48 @@ import numpy as np
 from math import ceil
 import spikefn
 import params_default
-from paramrw import quickreadprm, usingOngoingInputs, countEvokedInputs, usingEvokedInputs
-from paramrw import chunk_evinputs, get_inputs, trans_input, find_param
-from simdat import SIMCanvas, getinputfiles, readdpltrials
+from paramrw import usingOngoingInputs, countEvokedInputs, usingEvokedInputs
+from paramrw import chunk_evinputs, get_inputs, trans_input
+from simdat import SIMCanvas, getinputfiles
 from gutils import setscalegeom, lowresdisplay, setscalegeomcenter, getmplDPI, getscreengeom
 import nlopt
 from psutil import cpu_count, wait_procs, process_iter, NoSuchProcess
 from threading import Lock
 
-prtime = False
+from hnn_core import read_params
 
-def isWindows ():
+from run import simulate
+
+# setting matplotlib font size
+if dconf['fontsize'] > 0:
+  plt.rcParams['font.size'] = dconf['fontsize']
+else:
+  plt.rcParams['font.size'] = dconf['fontsize'] = 10
+
+# TODO: remove these globals
+PARAMF = dconf['paramf']
+BASEDIR = ''
+DEFNCORE = 0
+
+def update_param_globals(paramf):
+  global PARAMF, EXP_PREFIX, BASEDIR
+
+  PARAMF = dconf['paramf']
+  EXP_PREFIX = paramf.split(os.path.sep)[-1].split('.param')[0]
+  BASEDIR = os.path.join(dconf['datdir'], EXP_PREFIX)
+
+
+update_param_globals(PARAMF)
+
+debug = dconf['debug']
+testLFP = dconf['testlfp'] or dconf['testlaminarlfp']
+hnn_root_dir = os.path.dirname(os.path.realpath(__file__))
+
+def isWindows():
   # are we on windows? or linux/mac ?
   return sys.platform.startswith('win')
 
-def getPyComm ():
+def getPyComm():
   # get the python command - Windows only has python linux/mac have python3
   if sys.executable is not None: # check python command interpreter path - if available
     pyc = sys.executable
@@ -44,41 +71,19 @@ def getPyComm ():
     return 'python'
   return 'python3'
 
-def parseargs ():
-  for i in range(len(sys.argv)):
-    if sys.argv[i] == '-dataf' and i + 1 < len(sys.argv):
-      print('-dataf is ', sys.argv[i+1])
-      conf.dconf['dataf'] = dconf['dataf'] = sys.argv[i+1]
-      i += 1
-    elif sys.argv[i] == '-paramf' and i + 1 < len(sys.argv):
-      print('-paramf is ', sys.argv[i+1])
-      conf.dconf['paramf'] = dconf['paramf'] = sys.argv[i+1]
-      i += 1
+def get_defncore():
+  """ get default number of cores """
 
-parseargs()
+  try:
+    defncore = len(os.sched_getaffinity(0))
+  except AttributeError:
+    defncore = cpu_count(logical=False)
 
-simf = dconf['simf']
-paramf = dconf['paramf']
-debug = dconf['debug']
-testLFP = dconf['testlfp'] or dconf['testlaminarlfp']
+  if defncore is None or defncore == 0:
+    # in case psutil is not supported (e.g. BSD)
+    defncore = multiprocessing.cpu_count()
 
-# get default number of cores
-defncore = 0
-try:
-  defncore = len(os.sched_getaffinity(0))
-except AttributeError:
-  defncore = cpu_count(logical=False)
-
-if defncore is None or defncore == 0:
-  # in case psutil is not supported (e.g. BSD)
-  defncore = multiprocessing.cpu_count()
-
-if dconf['fontsize'] > 0: plt.rcParams['font.size'] = dconf['fontsize']
-else: plt.rcParams['font.size'] = dconf['fontsize'] = 10
-
-if debug: print('getPyComm:',getPyComm())
-
-hnn_root_dir = os.path.dirname(os.path.realpath(__file__))
+  return defncore
 
 # for signaling
 class Communicate (QObject):
@@ -110,7 +115,7 @@ def kill_list_of_procs(procs):
       p.terminate()
     except NoSuchProcess:
       pass
-  gone, alive = wait_procs(procs, timeout=3)
+  _, alive = wait_procs(procs, timeout=3)
   for p in alive:
     p.kill()
 
@@ -148,15 +153,15 @@ def bringwintotop (win):
 
 # based on https://nikolak.com/pyqt-threading-tutorial/
 class RunSimThread (QThread):
-  def __init__ (self,c,d,ntrial,ncore,waitsimwin,opt=False,baseparamwin=None,mainwin=None,onNSG=False):
+  def __init__ (self,c,d,ntrial,ncore,waitsimwin,paramf,opt=False,baseparamwin=None,mainwin=None,onNSG=False):
     QThread.__init__(self)
     self.c = c
     self.d = d
     self.killed = False
-    self.proc = None
     self.ntrial = ntrial
     self.ncore = ncore
     self.waitsimwin = waitsimwin
+    self.paramf = paramf
     self.opt = opt
     self.baseparamwin = baseparamwin
     self.mainwin = mainwin
@@ -174,6 +179,8 @@ class RunSimThread (QThread):
       self.canvComm.csig.connect(self.mainwin.initSimCanvas)
 
     self.lock = Lock()
+
+    self.params = read_params(self.paramf)
 
   def updateoptparams (self):
     self.c.updateRanges.emit()
@@ -217,22 +224,7 @@ class RunSimThread (QThread):
 
 
   def killproc (self):
-    if self.proc is None:
-      # any nrniv processes found are not part of current sim
-      return
-
     if debug: print('Thread killing sim. . .')
-
-    # try the nice way to stop the mpiexec proc
-    self.proc.terminate()
-
-    retries = 0
-    while self.proc.poll() is None and retries < 5:
-      # mpiexec still running
-      self.proc.kill()
-      if self.proc.poll() is None:
-        sleep(1)
-      retries += 1
 
     # make absolute sure all nrniv procs have been killed
     kill_and_check_nrniv_procs()
@@ -241,123 +233,56 @@ class RunSimThread (QThread):
     self.killed = True
     self.lock.release()
 
-  def spawn_sim (self, simlength, banner=False):
-    import simdat
-
-    mpicmd = 'mpiexec -np '
-
-    if banner:
-      nrniv_cmd = ' nrniv -python -mpi '
-    else:
-      nrniv_cmd = ' nrniv -python -mpi -nobanner '
-
-    if self.onNSG:
-      cmd = 'python nsgr.py ' + paramf + ' ' + str(self.ntrial) + ' 710.0'
-    elif not simlength is None:
-      cmd = mpicmd + str(self.ncore) + nrniv_cmd + simf + ' ' + paramf
-    else:
-      cmd = mpicmd + str(self.ncore) + nrniv_cmd + simf + ' ' + paramf
-    simdat.dfile = getinputfiles(paramf)
-
-    cmdargs = shlex.split(cmd,posix="win" not in sys.platform) # https://github.com/maebert/jrnl/issues/348
-    if debug: print("cmd:",cmd,"cmdargs:",cmdargs)
-    if prtime:
-      self.proc = Popen(cmdargs,cwd=os.getcwd())
-    else: 
-      self.proc = Popen(cmdargs,stdout=PIPE,stderr=PIPE,cwd=os.getcwd(),universal_newlines=True)
-
-  def get_proc_stream (self, stream, print_to_console=False):
-    for line in iter(stream.readline, ""):
-      if print_to_console:
-        print(line.strip())
-      try: # see https://stackoverflow.com/questions/2104779/qobject-qplaintextedit-multithreading-issues
-        self.updatewaitsimwin(line.strip()) # sends a pyqtsignal to waitsimwin, which updates its textedit
-      except:
-        if debug: print('RunSimThread updatewaitsimwin exception...')
-        pass # catch exception in case anything else goes wrong
-    stream.close()
 
   # run sim command via mpi, then delete the temp file.
   def runsim (self, is_opt=False, banner=True, simlength=None):
     import simdat
+    global DEFNCORE
 
-    global defncore
     self.lock.acquire()
     self.killed = False
     self.lock.release()
 
-    self.spawn_sim(simlength, banner=banner)
-    retried = False
-
-    #cstart = time()
-    while True:
-      status = self.proc.poll()
-      if not status is None:
-        if status == 0:
-          # success, use same number of cores next time
-          defncore = self.ncore
-          break
-        elif status == 1 and not retried:
-          self.ncore = ceil(self.ncore/2)
-          txt = "INFO: Failed starting mpiexec, retrying with %d cores" % self.ncore
+    while self.ncore > 0:
+      try:
+        simulate(self.params, self.ncore)
+        DEFNCORE = self.ncore
+        break
+      except RuntimeError:
+        if self.ncore == 1:
+          # can't reduce ncore any more
+          txt = "Simulation failed to start"
           print(txt)
           self.updatewaitsimwin(txt)
-          self.spawn_sim(simlength, banner=banner)
-          retried = True
-        else:
-          txt = "Simulation exited with return code %d. Stderr from console:"%status
-          print(txt)
-          self.updatewaitsimwin(txt)
-          self.get_proc_stream(self.proc.stderr, print_to_console=True)
           kill_and_check_nrniv_procs()
           raise RuntimeError
 
-      self.get_proc_stream(self.proc.stdout, print_to_console=False)
+        self.ncore = ceil(self.ncore/2)
+        txt = "INFO: Failed starting simulation, retrying with %d cores" % self.ncore
+        print(txt)
+        self.updatewaitsimwin(txt)
 
-      # check if proc was killed
-      self.lock.acquire()
-      if self.killed:
-        self.lock.release()
-        # exit using RuntimeError
-        raise RuntimeError
-      else:
-        self.lock.release()
-
-      sleep(1)
-
-    #cend = time()
-    #rtime = cend - cstart
-    #if debug: print('sim finished in %.3f s'%rtime)
-
-    try:
-      # load data from sucessful sim
-      simdat.ddat['dpl'] = np.loadtxt(simdat.dfile['dpl'])
-      if not is_opt:
-        simdat.updatelsimdat(paramf,simdat.ddat['dpl']) # update lsimdat and its current sim index
-    except OSError:
-      print('WARN: could not read simulation output: %s' % simdat.dfile['dpl'])
-    if os.path.isfile(simdat.dfile['spec']):
-      try:
-        simdat.ddat['spec'] = np.load(simdat.dfile['spec'])
-      except OSError:
-        print('WARN: could not read simulation output: %s' % simdat.dfile['spec'])
+    # check if proc was killed
+    self.lock.acquire()
+    if self.killed:
+      self.lock.release()
+      # exit using RuntimeError
+      raise RuntimeError
     else:
-      simdat.ddat['spec'] = None
+      self.lock.release()
 
-    try:
-      simdat.ddat['spk'] = np.loadtxt(simdat.dfile['spk'])
-    except OSError:
-      print('WARN: could not read simulation output: %s' % simdat.dfile['spk'])
-    try:
-      simdat.ddat['dpltrials'] = readdpltrials(os.path.join(dconf['datdir'],paramf.split(os.path.sep)[-1].split('.param')[0]),self.ntrial)
-    except OSError:
-      print('WARN: could not read dpl trials')
+    loaded_dat = simdat.updatedat(self.paramf, require_spec=self.params['save_spec_data'])
+    if not loaded_dat:
+      print('WARN: could not read simulation output for %s' % self.params['sim_prefix'])
+
+    if not is_opt:
+      simdat.updatelsimdat(self.paramf, simdat.ddat['dpl']) # update lsimdat and its current sim index
 
   def optmodel (self):
     import simdat
 
     # initialize RNG with seed from config
-    seed = int(find_param(paramf,'prng_seedcore_opt'))
+    seed = int(self.params['prng_seedcore_opt'])
     nlopt.srand(seed)
 
     simdat.initial_ddat = simdat.ddat.copy()
@@ -407,7 +332,7 @@ class RunSimThread (QThread):
       if not self.best_ddat is None:
         simdat.ddat = self.best_ddat.copy()
 
-      simdat.updateoptdat(paramf,simdat.ddat['dpl']) # update optdat with best from this step
+      simdat.updateoptdat(self.paramf, simdat.ddat['dpl']) # update optdat with best from this step
 
       # put best opt results into GUI
       push_values = OrderedDict()
@@ -421,13 +346,13 @@ class RunSimThread (QThread):
 
     # one final sim with the best parameters to update display
     self.runsim(is_opt=True, banner=False)
-    simdat.updatelsimdat(paramf,simdat.ddat['dpl']) # update lsimdat and its current sim index
+    simdat.updatelsimdat(self.paramf, simdat.ddat['dpl']) # update lsimdat and its current sim index
 
   def runOptStep (self):
     import simdat
 
     self.optiter = 0 # optimization iteration
-    fnoptinf = os.path.join(dconf['datdir'],paramf.split(os.path.sep)[-1].split('.param')[0],'optinf.txt')
+    fnoptinf = os.path.join(dconf['datdir'], self.sim_prefix, 'optinf.txt')
     optinf_dir = os.path.dirname(fnoptinf)
 
     # Make sure directory exists (in case optimization is run before simulation)
@@ -493,7 +418,7 @@ class RunSimThread (QThread):
       self.updatewaitsimwin(os.linesep+'Simulation finished: ' + txt + os.linesep) # print error
 
       # Be ready in case the user changes the simulation name in the middle of an optimization
-      fnoptinf = os.path.join(dconf['datdir'],paramf.split(os.path.sep)[-1].split('.param')[0],'optinf.txt')
+      fnoptinf = os.path.join(dconf['datdir'], self.sim_prefix, 'optinf.txt')
       optinf_dir = os.path.dirname(fnoptinf)
       os.makedirs(optinf_dir, exist_ok=True)
       
@@ -501,9 +426,9 @@ class RunSimThread (QThread):
         fpopt.write(str(simdat.ddat['errtot'])+os.linesep) # write error
 
       # backup the current param file
-      outdir = os.path.join(dconf['datdir'],paramf.split(os.path.sep)[-1].split('.param')[0])
+      outdir = os.path.join(dconf['datdir'], self.sim_prefix)
       # last param file
-      prmloc0 = os.path.join(outdir,paramf.split(os.path.sep)[-1])
+      prmloc0 = os.path.join(outdir, self.paramf.split(os.path.sep)[-1])
 
       # save numbered by optiter
       prmloc1 = os.path.join(outdir,'step_%d_iter_%d.param'%(self.cur_step,self.optiter))
@@ -1798,7 +1723,7 @@ class RunParamDialog (DictDialog):
   def initExtra (self):
     DictDialog.initExtra(self)
     self.dqextra['NumCores'] = QLineEdit(self)
-    self.dqextra['NumCores'].setText(str(defncore))
+    self.dqextra['NumCores'].setText(str(DEFNCORE))
     self.addtransvar('NumCores','Number Cores')
     self.ltabs[0].layout.addRow('NumCores',self.dqextra['NumCores'])
 
@@ -1810,7 +1735,7 @@ class RunParamDialog (DictDialog):
     if not din: return
 
     # number of cores may have changed if the configured number failed
-    self.dqextra['NumCores'].setText(str(defncore))
+    self.dqextra['NumCores'].setText(str(DEFNCORE))
     for k,v in din.items():
       if k in self.dqline:
         self.dqline[k].setText(str(v).strip())
@@ -2055,16 +1980,26 @@ class VisnetDialog (QDialog):
     super(VisnetDialog, self).__init__(parent)
     self.initUI()
 
-  def showcells3D (self): Popen([getPyComm(), 'visnet.py', 'cells', paramf]) # nonblocking
-  def showEconn (self): Popen([getPyComm(), 'visnet.py', 'Econn', paramf]) # nonblocking
-  def showIconn (self): Popen([getPyComm(), 'visnet.py', 'Iconn', paramf]) # nonblocking
+  def showcells3D (self):
+    global PARAMF
+    Popen([getPyComm(), 'visnet.py', 'cells', PARAMF]) # nonblocking
+
+  def showEconn (self):
+    global PARAMF
+    Popen([getPyComm(), 'visnet.py', 'Econn', PARAMF]) # nonblocking
+
+  def showIconn (self):
+    global PARAMF
+    Popen([getPyComm(), 'visnet.py', 'Iconn', PARAMF]) # nonblocking
 
   def runvisnet (self):
+    global PARAMF
+
     lcmd = [getPyComm(), 'visnet.py', 'cells']
     #if self.chkcells.isChecked(): lcmd.append('cells')
     #if self.chkE.isChecked(): lcmd.append('Econn')
     #if self.chkI.isChecked(): lcmd.append('Iconn')
-    lcmd.append(paramf)
+    lcmd.append(PARAMF)
     Popen(lcmd) # nonblocking
 
   def initUI (self):
@@ -2196,22 +2131,27 @@ class BaseParamDialog (QDialog):
     self.lsubwin = [self.runparamwin, self.cellparamwin, self.netparamwin,
                     self.proxparamwin, self.distparamwin, self.evparamwin,
                     self.poisparamwin, self.tonicparamwin, self.optparamwin]
-    self.updateDispParam()
+    self.params = self.updateDispParam()
 
   def updateDispParam (self):
+    global PARAMF
+
     # now update the GUI components to reflect the param file selected
-    din = quickreadprm(paramf)
-    if not 'tstop' in din:
+    params = read_params(PARAMF)
+    if not 'tstop' in params:
       print("WARNING: could not find a complete parameter file")
       return
 
-    if usingEvokedInputs(din): # default for evoked is to show average dipole
+    if usingEvokedInputs(params): # default for evoked is to show average dipole
       conf.dconf['drawavgdpl'] = True
-    elif usingOngoingInputs(din): # default for ongoing is NOT to show average dipole
+    elif usingOngoingInputs(params): # default for ongoing is NOT to show average dipole
       conf.dconf['drawavgdpl'] = False
 
-    for dlg in self.lsubwin: dlg.setfromdin(din) # update to values from file
-    self.qle.setText(paramf.split(os.path.sep)[-1].split('.param')[0]) # update simulation name
+    for dlg in self.lsubwin: dlg.setfromdin(params) # update to values from file
+    self.qle.setText(params['sim_prefix']) # update simulation name
+
+    # return the param dict for use by caller
+    return params
 
   def setrunparam (self): bringwintotop(self.runparamwin)
   def setcellparam (self): bringwintotop(self.cellparamwin)
@@ -2224,6 +2164,7 @@ class BaseParamDialog (QDialog):
   def settonicparam (self): bringwintotop(self.tonicparamwin)
 
   def initUI (self):
+    global EXP_PREFIX
 
     grid = QGridLayout()
     grid.setSpacing(10)
@@ -2236,7 +2177,7 @@ class BaseParamDialog (QDialog):
     self.lbl.setToolTip('Simulation Name used to save parameter file and simulation data')
     grid.addWidget(self.lbl, row, 0)
     self.qle = QLineEdit(self)
-    self.qle.setText(paramf.split(os.path.sep)[-1].split('.param')[0])
+    self.qle.setText(EXP_PREFIX)
     grid.addWidget(self.qle, row, 1)
     row+=1
 
@@ -2321,7 +2262,6 @@ class BaseParamDialog (QDialog):
     self.setWindowTitle('Set Parameters')    
 
   def saveparams (self, checkok = True):
-    global paramf,basedir
     tmpf = os.path.join(dconf['paramoutdir'],self.qle.text() + '.param')
     oktosave = True
     if os.path.isfile(tmpf) and checkok:
@@ -2336,9 +2276,11 @@ class BaseParamDialog (QDialog):
     if oktosave:
       if debug: print('Saving params to ',  tmpf)
       try:
-        with open(tmpf,'w') as fp: fp.write(str(self))
-        paramf = dconf['paramf'] = tmpf # success? update paramf
-        basedir = os.path.join(dconf['datdir'],paramf.split(os.path.sep)[-1].split('.param')[0])
+        with open(tmpf,'w') as fp:
+          fp.write(str(self))
+        # update paramf
+        dconf['paramf'] = tmpf 
+        update_param_globals(dconf['paramf'])
       except:
         print('Exception in saving param file!',tmpf)
     return oktosave
@@ -2418,7 +2360,7 @@ class HNNGUI (QMainWindow):
   # main HNN GUI class
   def __init__ (self):
     # initialize the main HNN GUI
-    global dfile, paramf
+
     super().__init__()   
     self.runningsim = False
     self.runthread = None
@@ -2429,6 +2371,7 @@ class HNNGUI (QMainWindow):
     self.schemwin = SchematicDialog(self)
     self.m = self.toolbar = None
     self.baseparamwin = BaseParamDialog(self, self.startoptmodel)
+    self.params = None
     self.optMode = False
     self.initUI()
     self.visnetwin = VisnetDialog(self)
@@ -2471,26 +2414,25 @@ class HNNGUI (QMainWindow):
     
   def selParamFileDialog (self):
     # bring up window to select simulation parameter file
-    global paramf,dfile
+    global PARAMF
+
     qfd = QFileDialog()
     qfd.setHistory([os.path.join(dconf['dbase'],'data')])
     fn = qfd.getOpenFileName(self, 'Open param file',
                                      os.path.join(hnn_root_dir,'param')) # uses forward slash, even on Windows OS
     if fn[0]:
-      paramf = os.path.abspath(fn[0]) # to make sure have right path separators on Windows OS
-      try:
-        dfile = getinputfiles(paramf) # reset input data - if already exists
-      except:
-        pass
+      PARAMF = os.path.abspath(fn[0]) # to make sure have right path separators on Windows OS
+      update_param_globals(PARAMF)
+
       # now update the GUI components to reflect the param file selected
-      self.baseparamwin.updateDispParam()
+      self.params = self.baseparamwin.updateDispParam()
       self.initSimCanvas() # recreate canvas
       # self.m.plot() # replot data
-      self.setWindowTitle(paramf)
+      self.setWindowTitle(PARAMF)
       # store the sim just loaded in simdat's list - is this the desired behavior? or should we first erase prev sims?
       import simdat
       if 'dpl' in simdat.ddat:
-        simdat.updatelsimdat(paramf,simdat.ddat['dpl']) # update lsimdat and its current sim index
+        simdat.updatelsimdat(PARAMF, simdat.ddat['dpl']) # update lsimdat and its current sim index
       self.populateSimCB() # populate the combobox
 
       if len(self.dextdata) > 0:
@@ -2498,7 +2440,10 @@ class HNNGUI (QMainWindow):
 
   def loadDataFile (self, fn):
     # load a dipole data file
-    global paramf
+
+    # TODO: fixup exceptions raised here
+
+    global PARAMF
 
     import simdat
     try:
@@ -2513,7 +2458,7 @@ class HNNGUI (QMainWindow):
       self.m.plot()
       self.m.draw() # make sure new lines show up in plot
 
-      if paramf:
+      if PARAMF:
         self.toggleEnableOptimization(True)
       return True
     except:
@@ -2573,7 +2518,7 @@ class HNNGUI (QMainWindow):
 
   def showSomaVPlot (self): 
     # start the somatic voltage visualization process (separate window)
-    global basedir, dfile
+    global PARAMF, BASEDIR
     if not float(self.baseparamwin.runparamwin.getval('save_vsoma')):
       smsg='In order to view somatic voltages you must first rerun the simulation with saving somatic voltages. To do so from the main GUI, click on Set Parameters -> Run -> Analysis -> Save Somatic Voltages, enter a 1 and then rerun the simulation.'
       msg = QMessageBox()
@@ -2583,49 +2528,43 @@ class HNNGUI (QMainWindow):
       msg.setStandardButtons(QMessageBox.Ok)      
       msg.exec_()
     else:
-      basedir = os.path.join(dconf['datdir'],paramf.split(os.path.sep)[-1].split('.param')[0])
-      lcmd = [getPyComm(), 'visvolt.py',paramf]
+      lcmd = [getPyComm(), 'visvolt.py',PARAMF]
       if debug: print('visvolt cmd:',lcmd)
       Popen(lcmd) # nonblocking
 
   def showPSDPlot (self):
     # start the PSD visualization process (separate window)
-    global basedir
-    basedir = os.path.join(dconf['datdir'],paramf.split(os.path.sep)[-1].split('.param')[0])
-    lcmd = [getPyComm(), 'vispsd.py',paramf]
+    global PARAMF
+    lcmd = [getPyComm(), 'vispsd.py', PARAMF]
     if debug: print('vispsd cmd:',lcmd)
     Popen(lcmd) # nonblocking
 
   def showLFPPlot (self):
     # start the LFP visualization process (separate window)
-    global basedir
-    basedir = os.path.join(dconf['datdir'],paramf.split(os.path.sep)[-1].split('.param')[0])
-    lcmd = [getPyComm(), 'vislfp.py',paramf]
+    global PARAMF
+    lcmd = [getPyComm(), 'vislfp.py', PARAMF]
     if debug: print('vislfp cmd:',lcmd)
     Popen(lcmd) # nonblocking
 
   def showSpecPlot (self):
     # start the spectrogram visualization process (separate window)
-    global basedir
-    basedir = os.path.join(dconf['datdir'],paramf.split(os.path.sep)[-1].split('.param')[0])
-    lcmd = [getPyComm(), 'visspec.py',paramf]
+    global PARAMF
+    lcmd = [getPyComm(), 'visspec.py', PARAMF]
     if debug: print('visspec cmd:',lcmd)
     Popen(lcmd) # nonblocking
 
   def showRasterPlot (self):
     # start the raster plot visualization process (separate window)
-    global basedir
-    basedir = os.path.join(dconf['datdir'],paramf.split(os.path.sep)[-1].split('.param')[0])
-    lcmd = [getPyComm(), 'visrast.py',paramf,os.path.join(basedir,'spk.txt')]
+    global PARAMF, BASEDIR
+    lcmd = [getPyComm(), 'visrast.py', PARAMF, os.path.join(BASEDIR,'spk.txt')]
     if dconf['drawindivrast']: lcmd.append('indiv')
     if debug: print('visrast cmd:',lcmd)
     Popen(lcmd) # nonblocking
 
   def showDipolePlot (self):
     # start the dipole visualization process (separate window)
-    global basedir
-    basedir = os.path.join(dconf['datdir'],paramf.split(os.path.sep)[-1].split('.param')[0])
-    lcmd = [getPyComm(), 'visdipole.py',paramf,os.path.join(basedir,'dpl.txt')]
+    global PARAMF, BASEDIR
+    lcmd = [getPyComm(), 'visdipole.py', PARAMF, os.path.join(BASEDIR,'dpl.txt')]
     if debug: print('visdipole cmd:',lcmd)
     Popen(lcmd) # nonblocking    
 
@@ -2672,15 +2611,15 @@ class HNNGUI (QMainWindow):
     except:
       pass
     # now update the GUI components to reflect the param file selected
-    self.baseparamwin.updateDispParam()
+    self.params = self.baseparamwin.updateDispParam()
     self.initSimCanvas() # recreate canvas
     self.setWindowTitle(fn)
 
   def removeSim (self):
     # remove the currently selected simulation
-    global paramf,dfile
+    global PARAMF
     import simdat
-    if debug: print('removeSim',paramf,simdat.lsimidx)
+    if debug: print('removeSim', PARAMF, simdat.lsimidx)
     if len(simdat.lsimdat) > 0 and simdat.lsimidx >= 0:
       cidx = self.cbsim.currentIndex() # 
       a = simdat.lsimdat[:cidx]
@@ -2691,45 +2630,57 @@ class HNNGUI (QMainWindow):
       self.cbsim.removeItem(cidx)
       simdat.lsimidx = max(0,len(simdat.lsimdat) - 1)
       if len(simdat.lsimdat) > 0:
-        paramf = simdat.lsimdat[simdat.lsimidx][0]
-        if debug: print('new paramf:',paramf,simdat.lsimidx)
-        self.updateDatCanv(paramf)
+        PARAMF = simdat.lsimdat[simdat.lsimidx][0]
+        update_param_globals(PARAMF)
+        if debug: print('new paramf:', PARAMF, simdat.lsimidx)
+        self.updateDatCanv(PARAMF)
         self.cbsim.setCurrentIndex(simdat.lsimidx)
       else:
         self.clearSimulations()
 
   def prevSim (self):
     # go to previous simulation 
-    global paramf,dfile
+    global PARAMF
+
     import simdat
-    if debug: print('prevSim',paramf,simdat.lsimidx)
+    if debug: print('prevSim',PARAMF,simdat.lsimidx)
     if len(simdat.lsimdat) > 0 and simdat.lsimidx > 0:
       simdat.lsimidx -= 1
-      paramf = simdat.lsimdat[simdat.lsimidx][0]
-      if debug: print('new paramf:',paramf,simdat.lsimidx)
-      self.updateDatCanv(paramf)
+      PARAMF = simdat.lsimdat[simdat.lsimidx][0]
+      update_param_globals(PARAMF)
+      if debug: print('new paramf:',PARAMF, simdat.lsimidx)
+      self.updateDatCanv(PARAMF)
       self.cbsim.setCurrentIndex(simdat.lsimidx)
 
   def nextSim (self):
     # go to next simulation
-    global paramf,dfile
+    global PARAMF
+
     import simdat
-    if debug: print('nextSim',paramf,simdat.lsimidx)
+    if debug: print('nextSim', PARAMF, simdat.lsimidx)
     if len(simdat.lsimdat) > 0 and simdat.lsimidx + 1 < len(simdat.lsimdat):
       simdat.lsimidx += 1
-      paramf = simdat.lsimdat[simdat.lsimidx][0]
-      if debug: print('new paramf:',paramf,simdat.lsimidx)
-      self.updateDatCanv(paramf)
+      PARAMF = simdat.lsimdat[simdat.lsimidx][0]
+      update_param_globals(PARAMF)
+      if debug: print('new paramf:',PARAMF, simdat.lsimidx)
+      self.updateDatCanv(PARAMF)
       self.cbsim.setCurrentIndex(simdat.lsimidx)
 
   def clearSimulationData (self):
     # clear the simulation data
-    global paramf
     import simdat
-    paramf = '' # set paramf to empty so no data gets loaded
+
+    global PARAMF, BASEDIR, EXP_PREFIX
+
+    PARAMF = '' # set PARAMF to empty so no data gets loaded
+    BASEDIR = ''
+    EXP_PREFIX = ''
+
     simdat.ddat = {} # clear data in simdat.ddat
     simdat.lsimdat = []
     simdat.lsimidx = 0
+    self.params = None
+
     self.populateSimCB() # un-populate the combobox
     self.toggleEnableOptimization(False)
 
@@ -2959,7 +2910,9 @@ class HNNGUI (QMainWindow):
   def showoptparamwin (self): bringwintotop(self.baseparamwin.optparamwin)
   def showdistparamwin (self): bringwintotop(self.erselectdistal)
   def showproxparamwin (self): bringwintotop(self.erselectprox)
-  def showvisnet (self): Popen([getPyComm(), 'visnet.py', 'cells', paramf]) # nonblocking
+  def showvisnet (self):
+    global PARAMF
+    Popen([getPyComm(), 'visnet.py', 'cells', PARAMF]) # nonblocking
   def showschematics (self): bringwintotop(self.schemwin)
 
   def addParamImageButtons (self,gRow):
@@ -3023,12 +2976,14 @@ class HNNGUI (QMainWindow):
   def initUI (self):
     # initialize the user interface (UI)
 
+    global PARAMF
+
     self.initMenu()
     self.statusBar()
 
     setscalegeomcenter(self, 1500, 1300) # start GUI in center of screenm, scale based on screen w x h 
 
-    self.setWindowTitle(paramf)
+    self.setWindowTitle(PARAMF)
     QToolTip.setFont(QFont('SansSerif', 10))        
 
     self.grid = grid = QGridLayout()
@@ -3046,7 +3001,7 @@ class HNNGUI (QMainWindow):
     # store any sim just loaded in simdat's list - is this the desired behavior? or should we start empty?
     import simdat
     if 'dpl' in simdat.ddat:
-      simdat.updatelsimdat(paramf,simdat.ddat['dpl']) # update lsimdat and its current sim index
+      simdat.updatelsimdat(PARAMF, simdat.ddat['dpl']) # update lsimdat and its current sim index
 
     self.cbsim = QComboBox(self)
     self.populateSimCB() # populate the combobox
@@ -3086,19 +3041,19 @@ class HNNGUI (QMainWindow):
 
   def onActivateSimCB (self, s):
     # load simulation when activating simulation combobox
-    global paramf,dfile
+    global PARAMF
     import simdat
-    if debug: print('onActivateSimCB',s,paramf,self.cbsim.currentIndex(),simdat.lsimidx)
+    if debug: print('onActivateSimCB', s, PARAMF, self.cbsim.currentIndex(), simdat.lsimidx)
     if self.cbsim.currentIndex() != simdat.lsimidx:
       if debug: print('Loading',s)
-      paramf = s
+      PARAMF = s
+      update_param_globals(PARAMF)
       simdat.lsimidx = self.cbsim.currentIndex()
-      self.updateDatCanv(paramf)
+      self.updateDatCanv(PARAMF)
 
   def populateSimCB (self):
     # populate the simulation combobox
     if debug: print('populateSimCB')
-    global paramf
     self.cbsim.clear()
     import simdat
     for l in simdat.lsimdat:
@@ -3108,14 +3063,16 @@ class HNNGUI (QMainWindow):
   def initSimCanvas (self,recalcErr=True,optMode=False,gRow=1,reInit=True):
     # initialize the simulation canvas, loading any required data
 
+    global PARAMF
+
     gCol = 0
 
     if reInit == True:
       self.grid.itemAtPosition(gRow, gCol).widget().deleteLater()
       self.grid.itemAtPosition(gRow + 1, gCol).widget().deleteLater()
 
-    if debug: print('paramf in initSimCanvas:',paramf)
-    self.m = SIMCanvas(paramf, parent = self, width=10, height=1, dpi=getmplDPI(), optMode=optMode) # also loads data
+    if debug: print('paramf in initSimCanvas:',PARAMF)
+    self.m = SIMCanvas(PARAMF, self.params, parent = self, width=10, height=1, dpi=getmplDPI(), optMode=optMode) # also loads data
     # this is the Navigation widget
     # it takes the Canvas widget and a parent
     self.toolbar = NavigationToolbar(self.m, self)
@@ -3192,7 +3149,7 @@ class HNNGUI (QMainWindow):
     self.btnsim.setText("Stop Optimization") 
     self.qbtn.setEnabled(False)
 
-    self.runthread = RunSimThread(self.c, self.d, ntrial, ncore, self.waitsimwin, opt=True, baseparamwin=self.baseparamwin, mainwin=self, onNSG=False)
+    self.runthread = RunSimThread(self.c, self.d, ntrial, ncore, self.waitsimwin, PARAMF, opt=True, baseparamwin=self.baseparamwin, mainwin=self, onNSG=False)
 
     # We have all the events we need connected we can start the thread
     self.runthread.start()
@@ -3216,7 +3173,7 @@ class HNNGUI (QMainWindow):
     else:
       self.statusBar().showMessage("Running simulation. . .")
 
-    self.runthread=RunSimThread(self.c,self.d,ntrial,ncore,self.waitsimwin,opt=False,baseparamwin=None,mainwin=None,onNSG=onNSG)
+    self.runthread=RunSimThread(self.c,self.d,ntrial,ncore,self.waitsimwin,PARAMF,opt=False,baseparamwin=None,mainwin=None,onNSG=onNSG,)
 
     # We have all the events we need connected we can start the thread
     self.runthread.start()
@@ -3231,17 +3188,21 @@ class HNNGUI (QMainWindow):
     bringwintotop(self.waitsimwin)
 
   def done (self, optMode, failed):
-    # called when the simulation completes running
-    if debug: print('done')
+    """ called when the simulation completes running """
+
+    global BASEDIR
+
+    if debug:
+      print('done')
+
     self.runningsim = False
     self.waitsimwin.hide()
     self.statusBar().showMessage("")
     self.btnsim.setText("Run Simulation")
     self.qbtn.setEnabled(True)
     self.initSimCanvas(optMode=optMode) # recreate canvas (plots too) to avoid incorrect axes
+
     # self.m.plot()
-    global basedir
-    basedir = os.path.join(dconf['datdir'],paramf.split(os.path.sep)[-1].split('.param')[0])
     self.setcursors(Qt.ArrowCursor)
     if failed:
       msg = "Failed "
@@ -3253,8 +3214,8 @@ class HNNGUI (QMainWindow):
     else:
       msg += "running sim "
 
-    QMessageBox.information(self, "Done!", msg + "using " + paramf + '. Saved data/figures in: ' + basedir)
-    self.setWindowTitle(paramf)
+    QMessageBox.information(self, "Done!", msg + "using " + PARAMF + '. Saved data/figures in: ' + BASEDIR)
+    self.setWindowTitle(PARAMF)
     self.populateSimCB() # populate the combobox
 
 if __name__ == '__main__':    
